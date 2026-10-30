@@ -57,7 +57,7 @@
     "not_validation": [
       "2023/2024"
     ],
-    "mcc_guard": 0.05
+    "guard_weeks": 1
   },
   "season_subsets": {
     "min_seasons": 5
