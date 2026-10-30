@@ -1,0 +1,73 @@
+{
+  "project": "Назва області або країни, сезон",
+  "paths": {
+    "series_dir": "C:/шлях/до/папки/з/рядами",
+    "territories": "input/territories.csv",
+    "output_dir": "output"
+  },
+  "season": {
+    "start_week": 40,
+    "end_week": 20,
+    "holiday_weeks": [
+      52,
+      1,
+      2
+    ],
+    "max_seasons": 10
+  },
+  "placeholder_seasons": [],
+  "exclude_seasons": {
+    "2020/2021": "приклад: причина виключення сезону"
+  },
+  "angle": {
+    "min": 2.0,
+    "max": 4.0,
+    "step": 0.25,
+    "default": 2.8,
+    "min_seasons_goodness": 5,
+    "criterion": "loss",
+    "weights": {
+      "false_alert": 1,
+      "delay": 1
+    },
+    "truth_angle": 2.8,
+    "stability_drop": 0.2
+  },
+  "small_areas": {
+    "angle": "auto",
+    "method": "mixture",
+    "groups": {
+      "reliable_min": 14,
+      "limited_min": 6
+    },
+    "groups_window_seasons": null
+  },
+  "start_cleaning": {
+    "enabled": true,
+    "apply_to": "small",
+    "mad_multiplier": 2.5,
+    "compare_weeks": 8
+  },
+  "season_selection": {
+    "enabled": true,
+    "min_seasons": 5,
+    "validation_seasons": 5,
+    "tolerance": 0
+  },
+  "season_subsets": {
+    "min_seasons": 5
+  },
+  "validation": {
+    "hidden_season_check": true
+  },
+  "diagnostics": {
+    "proportionality": true,
+    "multiple_waves": true
+  },
+  "export": {
+    "dashboard_dim_thresholds": false
+  },
+  "parallel": {
+    "workers": 4
+  }
+}

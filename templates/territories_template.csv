@@ -1,0 +1,6 @@
+﻿id,name,level,kind,file,sheet,population,reference_id,type,group,export_dim
+REGION,Назва області,область,main,series_region.xlsx,Область,,,,,yes
+DISTRICT1,Назва району 1,район,main,series_districts.xlsx,Район 1,,,,,yes
+DISTRICT2,Назва району 2,район,main,series_districts.xlsx,Район 2,,,,,yes
+SMALL1,Назва малої території 1,громада,small,series_small.xlsx,SMALL1,12000,DISTRICT1,міська,DISTRICT1,yes
+SMALL2,Назва малої території 2,громада,small,series_small.xlsx,SMALL2,4500,DISTRICT1,сільська,DISTRICT1,yes

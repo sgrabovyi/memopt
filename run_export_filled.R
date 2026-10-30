@@ -1,0 +1,6 @@
+# Окремий запуск: записати ряди територій-еталонів із заповненими пропусками (output/reference_series_filled.csv)
+here <- dirname(sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1]))
+source(file.path(here, "R", "memopt_core.R"), encoding = "UTF-8")
+cfg <- mo_load_config(file.path(here, "config.json")); terr <- mo_read_territories(cfg)
+mo_export_filled(cfg, terr, file.path(cfg$.path(cfg$paths$output_dir), "reference_series_filled.csv"))
+cat("Готово\n")

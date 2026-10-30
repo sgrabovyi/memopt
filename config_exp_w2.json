@@ -1,0 +1,75 @@
+{
+  "project": "Сумська область: ГРВІ, пороги MEM на сезон 2026/27",
+  "paths": {
+    "series_dir": "C:/Диск D/01 - Word/аналіз грві/мем (Грабовий С.Л.)/Пороги 2026-27/Датасети",
+    "territories": "input/territories.csv",
+    "output_dir": "output/experiment_w2"
+  },
+  "season": {
+    "start_week": 40,
+    "end_week": 20,
+    "holiday_weeks": [
+      52,
+      1,
+      2
+    ],
+    "max_seasons": 10
+  },
+  "placeholder_seasons": [
+    "2026/2027"
+  ],
+  "exclude_seasons": {
+    "2015/2016": "пандемічний грип A(H1N1)",
+    "2016/2017": "пандемічний грип A(H1N1)",
+    "2021/2022": "хвиля омікрону",
+    "2022/2023": "продовження омікрону, масова міграція, збої медичної мережі",
+    "2012/2013": "еталони та пороги на п'яти сезонах: найстаріші сезони з іншими знаменниками (рішення 21.10.2026)",
+    "2013/2014": "еталони та пороги на п'яти сезонах: найстаріші сезони з іншими знаменниками (рішення 21.10.2026)",
+    "2014/2015": "еталони та пороги на п'яти сезонах: найстаріші сезони з іншими знаменниками (рішення 21.10.2026)"
+  },
+  "angle": {
+    "min": 2.0,
+    "max": 4.0,
+    "step": 0.25,
+    "default": 2.8,
+    "min_seasons_goodness": 5,
+    "criterion": "loss",
+    "weights": {
+      "false_alert": 2,
+      "delay": 1
+    },
+    "truth_angle": 2.8,
+    "stability_drop": 0.2
+  },
+  "small_areas": {
+    "angle": "auto",
+    "method": "mixture",
+    "groups": {
+      "reliable_min": 14,
+      "limited_min": 6
+    },
+    "groups_window_seasons": null
+  },
+  "start_cleaning": {
+    "enabled": true,
+    "apply_to": "small",
+    "mad_multiplier": 2.5,
+    "compare_weeks": 8
+  },
+  "season_subsets": {
+    "min_seasons": 5
+  },
+  "validation": {
+    "hidden_season_check": true
+  },
+  "diagnostics": {
+    "proportionality": true,
+    "multiple_waves": true
+  },
+  "export": {
+    "dashboard_dim_thresholds": false
+  },
+  "parallel": {
+    "workers": 6
+  }
+}

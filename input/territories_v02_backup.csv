@@ -1,0 +1,68 @@
+﻿id,name,level,source,file,sheet,parent_center,parent_nocenter,settlement_type,pop
+UA59,Сумська область,oblast,xlsx,Сумська область.xlsx,Сумська,,,,
+UA5902,Конотопський район,district,xlsx,Конотопський.xlsx,Конотопський,UA59,,,
+UA5902_nc,Конотопський район без центру,district_nocenter,xlsx,Сезони без міст.xlsx,Без Конотопа,,,,
+UA5902_city,м. Конотоп,city,xlsx,Сезони по містах.xlsx,Конотоп,,,,
+UA5904,Охтирський район,district,xlsx,Охтирський.xlsx,Охтирський,UA59,,,
+UA5904_nc,Охтирський район без центру,district_nocenter,xlsx,Сезони без міст.xlsx,Без Охтирки,,,,
+UA5904_city,м. Охтирка,city,xlsx,Сезони по містах.xlsx,Охтирка,,,,
+UA5906,Роменський район,district,xlsx,Роменський.xlsx,Роменський,UA59,,,
+UA5906_nc,Роменський район без центру,district_nocenter,xlsx,Сезони без міст.xlsx,Без Ромнів,,,,
+UA5906_city,м. Ромни,city,xlsx,Сезони по містах.xlsx,Ромни,,,,
+UA5908,Сумський район,district,xlsx,Сумський.xlsx,Сумський,UA59,,,
+UA5908_nc,Сумський район без центру,district_nocenter,xlsx,Сезони без міст.xlsx,Без Сум,,,,
+UA5908_city,м. Суми,city,xlsx,Сезони по містах.xlsx,Суми,,,,
+UA5910,Шосткинський район,district,xlsx,Шосткінський.xlsx,Шосткінський,UA59,,,
+UA5910_nc,Шосткинський район без центру,district_nocenter,xlsx,Сезони без міст.xlsx,Без Шостки,,,,
+UA5910_city,м. Шостка,city,xlsx,Сезони по містах.xlsx,Шостка,,,,
+UA5902001,Бочечківська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902001,UA5902,UA5902_nc,сільська,4287
+UA5902003,Буринська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902003,UA5902,UA5902_nc,міська,19678
+UA5902005,Дубов’язівська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902005,UA5902,UA5902_nc,селищна,9733
+UA5902007,Конотопська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902007,UA5902,UA5902_nc,міська,87403
+UA5902009,Кролевецька міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902009,UA5902,UA5902_nc,міська,35033
+UA5902011,Новослобідська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902011,UA5902,UA5902_nc,сільська,4890
+UA5902013,Попівська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902013,UA5902,UA5902_nc,сільська,13026
+UA5902015,Путивльська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5902015,UA5902,UA5902_nc,міська,20358
+UA5904001,Боромлянська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904001,UA5904,UA5904_nc,сільська,4920
+UA5904003,Великописарівська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904003,UA5904,UA5904_nc,селищна,10009
+UA5904005,Грунська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904005,UA5904,UA5904_nc,сільська,5271
+UA5904007,Кириківська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904007,UA5904,UA5904_nc,селищна,6064
+UA5904009,Комишанська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904009,UA5904,UA5904_nc,сільська,2988
+UA5904011,Охтирська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904011,UA5904,UA5904_nc,міська,47642
+UA5904013,Тростянецька міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904013,UA5904,UA5904_nc,міська,28107
+UA5904015,Чернеччинська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904015,UA5904,UA5904_nc,сільська,9576
+UA5904017,Чупахівська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5904017,UA5904,UA5904_nc,селищна,5530
+UA5906001,Андріяшівська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906001,UA5906,UA5906_nc,сільська,8368
+UA5906003,Вільшанська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906003,UA5906,UA5906_nc,сільська,4521
+UA5906005,Коровинська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906005,UA5906,UA5906_nc,сільська,3631
+UA5906007,Липоводолинська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906007,UA5906,UA5906_nc,селищна,12499
+UA5906009,Недригайлівська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906009,UA5906,UA5906_nc,селищна,13946
+UA5906011,Роменська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906011,UA5906,UA5906_nc,міська,54264
+UA5906013,Синівська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906013,UA5906,UA5906_nc,сільська,4575
+UA5906015,Хмелівська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5906015,UA5906,UA5906_nc,сільська,5705
+UA5908001,Бездрицька сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908001,UA5908,UA5908_nc,сільська,3425
+UA5908003,Білопільська міська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908003,UA5908,UA5908_nc,міська,22579
+UA5908005,Верхньосироватська сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908005,UA5908,UA5908_nc,сільська,6018
+UA5908007,Ворожбянська міська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908007,UA5908,UA5908_nc,міська,8114
+UA5908009,Краснопільська селищна ТГ,hromada,long,input/hromada_raw_long.csv,UA5908009,UA5908,UA5908_nc,селищна,20421
+UA5908011,Лебединська міська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908011,UA5908,UA5908_nc,міська,41421
+UA5908013,Миколаївська селищна ТГ(Білопільська),hromada,long,input/hromada_raw_long.csv,UA5908013,UA5908,UA5908_nc,селищна,11970
+UA5908015,Миколаївська сільська ТГ (Сумська),hromada,long,input/hromada_raw_long.csv,UA5908015,UA5908,UA5908_nc,сільська,6685
+UA5908017,Миропільська сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908017,UA5908,UA5908_nc,сільська,4172
+UA5908019,Нижньосироватська сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908019,UA5908,UA5908_nc,сільська,5782
+UA5908021,Річківська сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908021,UA5908,UA5908_nc,сільська,4065
+UA5908023,Садівська сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908023,UA5908,UA5908_nc,сільська,10000
+UA5908025,Степанівська селищна ТГ,hromada,long,input/hromada_raw_long.csv,UA5908025,UA5908,UA5908_nc,селищна,10787
+UA5908027,Сумська міська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908027,UA5908,UA5908_nc,міська,267046
+UA5908029,Хотінська селищна ТГ,hromada,long,input/hromada_raw_long.csv,UA5908029,UA5908,UA5908_nc,селищна,6096
+UA5908031,Юнаківська сільська ТГ,hromada,long,input/hromada_raw_long.csv,UA5908031,UA5908,UA5908_nc,сільська,5735
+UA5910001,Березівська сільська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910001,UA5910,UA5910_nc,сільська,4764
+UA5910003,Глухівська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910003,UA5910,UA5910_nc,міська,37931
+UA5910005,Хутір-Михайлівська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910005,UA5910,UA5910_nc,міська,5295
+UA5910007,Есманьська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910007,UA5910,UA5910_nc,селищна,5429
+UA5910009,Зноб-Новгородська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910009,UA5910,UA5910_nc,селищна,4690
+UA5910011,Свеська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910011,UA5910,UA5910_nc,селищна,8282
+UA5910013,Середино-Будська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910013,UA5910,UA5910_nc,міська,10308
+UA5910015,Шалигинська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910015,UA5910,UA5910_nc,селищна,4131
+UA5910017,Шосткинська міська ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910017,UA5910,UA5910_nc,міська,90591
+UA5910019,Ямпільська селищна ОТГ,hromada,long,input/hromada_raw_long.csv,UA5910019,UA5910,UA5910_nc,селищна,8011
