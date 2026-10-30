@@ -76,7 +76,7 @@ ax.fill_between(range(len(WEEKS)), 0, np.where(gate, r, np.nan), color="#9DC3E6"
 ax.set_xticks(range(0, len(WEEKS), 2)); ax.set_xticklabels(LAB[::2])
 ax.set_xlabel("Тиждень сезону"); ax.set_ylabel("Район, на 100 тис.")
 ax.legend(fontsize=7, frameon=False, loc="upper left")
-fig.tight_layout(); fig.savefig(f"{FIG}/fig3_rule_a.png", dpi=220); plt.close(fig)
+fig.tight_layout(); fig.savefig(f"{FIG}/fig3_district_confirm.png", dpi=220); plt.close(fig)
 
 # ---------- Рис. 4: тижнів вище епідемічного порогу району в 2025/2026: пороги на 8 і на 5 сезонах
 # Числа восьмисезонного варіанта взято з попереднього запуску memopt (config_8seasons_backup.json, 20.10.2026);

@@ -1,4 +1,4 @@
-﻿id,name,level,kind,file,sheet,population,reference_id,type,group,export_dim,export_rule_a
+﻿id,name,level,kind,file,sheet,population,reference_id,type,group,export_dim,district_confirm
 UA59,Сумська область,область,main,Сумська область.xlsx,Сумська,,,,,yes,
 UA5902,Конотопський район,район,main,Конотопський.xlsx,Конотопський,,,,UA59,yes,
 UA5902_nc,Конотопський район без центру,район без центру,main,Сезони без міст.xlsx,Без Конотопа,,,,,no,
