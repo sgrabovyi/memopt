@@ -4,3 +4,4 @@ __pycache__/
 .Rhistory
 .RData
 output_*.log
+output_test_*/
