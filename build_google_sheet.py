@@ -1,13 +1,16 @@
 # Книга «Пороги для гугл-таблиці»: 51 громада, 10 районів, область, у тому вигляді, в якому пороги переносяться
 # в оперативну гугл-таблицю (назви як у колонці A таблиці, еталон, позначка «правило підтвердження районом», чотири пороги, середній поріг
 # у випадках на тиждень). Позначку (так/ні) беремо з колонки district_confirm переліку територій, а якщо її нема,
-# з попередньої версії книги. Запуск: python build_google_sheet.py (після run_optimizer.R)
+# з попередньої версії книги. Одночасно пишеться CSV з тим самим вмістом для імпорту в гугл-таблицю: роздільник «;»,
+# десяткова кома (українські налаштування таблиці), UTF-8 з позначкою порядку байтів, щоб і Excel читав кирилицю.
+# Запуск: python build_google_sheet.py (після run_optimizer.R)
 import os
 
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "output", "Пороги_для_гугл_таблиці.xlsx")
+OUT_CSV = os.path.splitext(OUT)[0] + ".csv"
 NEWH = "Правило підтвердження районом"
 T = pd.read_csv(os.path.join(HERE, "output", "memopt_thresholds.csv")).set_index("id")
 terr = pd.read_csv(os.path.join(HERE, "input", "territories.csv"))
@@ -35,4 +38,5 @@ t = T.loc["UA59"]
 rows.append([label["UA59"], None, "ні", round(t["base"], 2), round(t["medium"], 2), round(t["high"], 2), round(t["veryhigh"], 2), None])
 df = pd.DataFrame(rows, columns=["Територія (як у колонці A)", "Еталон (як у колонці A)", NEWH, "Епідемічний поріг", "Середній поріг", "Високий поріг", "Дуже високий поріг", "Середній поріг, випадків на тиждень"])
 df.to_excel(OUT, index=False)
-print("saved", OUT, df.shape, "правило підтвердження районом:", (df[NEWH] == "так").sum())
+df.to_csv(OUT_CSV, index=False, sep=";", decimal=",", encoding="utf-8-sig")
+print("saved", OUT, "і", OUT_CSV, df.shape, "правило підтвердження районом:", (df[NEWH] == "так").sum())
