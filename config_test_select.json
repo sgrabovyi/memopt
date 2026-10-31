@@ -76,7 +76,5 @@
   "parallel": {
     "workers": 6
   },
-  "report": {
-    "change_flag_pct": 25
-  }
+  "exclude_territory_seasons": {}
 }

@@ -46,7 +46,7 @@ MO_LABELS <- c(id = "Код", name = "Назва", level = "Рівень", seaso
   n_seasons = "Сезонів у наборі", eval_seasons = "Контрольні сезони", mcc_floor = "Найнижчий дозволений MCC",
   ctl_tp = "Тижні епідемії над порогом", ctl_fp = "Тижні поза епідемією над порогом", ctl_fn = "Тижні епідемії під порогом", ctl_tn = "Тижні поза епідемією під порогом", note = "Примітка", n_available = "Сезонів доступно",
   seasons_used_prev = "Сезони попереднього запуску", base_prev = "Попередній епідемічний поріг", medium_prev = "Попередній середній поріг",
-  pct_medium = "Зміна середнього порогу, %", weeks_missing = "Пропущено тижнів усередині сезону", weeks_zero = "Нульових тижнів",
+  pct_medium = "Зміна середнього порогу, %", flag_limit = "Найбільший вплив одного сезону, %", mcc_ctl = "MCC на контрольних сезонах", truth_angle = "Кут для меж епідемії", infl_max_pct = "Найбільший вплив одного сезону, %", weeks_missing = "Пропущено тижнів усередині сезону", weeks_zero = "Нульових тижнів",
   peak_ratio = "Пік до звичного піку")
 
 # ---------------------------------------------------------------- налаштування
@@ -111,7 +111,8 @@ mo_load_config <- function(path) {
   cfg$season_selection <- ss
   # Межі епідемії за рішенням користувача (тижні початку і кінця) замість memtiming для окремих сезонів
   if (is.null(cfg$epidemic_periods)) cfg$epidemic_periods <- list()
-  cfg$report$change_flag_pct <- mo_def(cfg$report$change_flag_pct, 25)
+  # виключення сезону лише для однієї території (вади даних): {"код території": {"сезон": "причина"}}
+  if (is.null(cfg$exclude_territory_seasons)) cfg$exclude_territory_seasons <- list()
   # набори сезонів, обрані попереднім запуском (output/season_sets.json): їх бачать ретроспектива, приклади і книга для memapp
   sf <- file.path(cfg$.path(cfg$paths$output_dir), "season_sets.json")
   cfg$.season_sets <- if (file.exists(sf)) fromJSON(sf, simplifyVector = FALSE) else NULL
@@ -171,6 +172,7 @@ mo_excluded <- function(cfg) c(names(MO_AUTO_EXCLUDE), names(cfg$exclude_seasons
 mo_series <- function(row, cfg, log = NULL, clean = TRUE, multiplier = NULL, compare_weeks = NULL, all_seasons = FALSE) {
   d <- mo_read_raw(row, cfg)
   d <- d[, !(names(d) %in% mo_excluded(cfg)), drop = FALSE]
+  d <- d[, !(names(d) %in% names(cfg$exclude_territory_seasons[[row$id]])), drop = FALSE]
   d <- d[, colSums(!is.na(d)) > 0, drop = FALSE]
   d <- d[, order(names(d)), drop = FALSE]
   if (NCOL(d) > cfg$season$max_seasons) d <- d[, tail(names(d), cfg$season$max_seasons), drop = FALSE]
@@ -358,7 +360,8 @@ mo_choose_angle <- function(d, cfg, eval_seasons = NULL) mo_select_angle(mo_scan
 # Сезони впорядковано від найстарішого до найновішого, виключені вже прибрано, лишилось не більше max_seasons найновіших.
 # Основа набору: усі сезони від початку нинішньої епохи (era_start, зараз воєнні сезони з 2023/2024).
 # Поки їх менше era_full, до основи по одному додаються старші сезони, підряд від найновішого; кандидати це набори
-# з k найновіших сезонів, від основи до всіх доступних. Коли сезонів епохи вже era_full і більше, старші не розглядаються.
+# з k найновіших сезонів, від основи до всіх доступних. Коли сезонів епохи вже era_full і більше, вибір триває:
+# порівнюються набори з recommended_min (5) до всіх доступних (не більше max_seasons, 10) найновіших сезонів.
 # Контрольні сезони: сезони епохи, крім not_validation. Для кожного кандидата кут обирається за звичайними правилами,
 # а помилка рахується так: поріг з набору без контрольного сезону, хибні сигнали до і після епідемії плюс запізнення,
 # сума за всіма контрольними сезонами. MCC кожного кандидата рахується на тих самих контрольних сезонах і тим самим
@@ -366,16 +369,32 @@ mo_choose_angle <- function(d, cfg, eval_seasons = NULL) mo_select_angle(mo_scan
 # був би MCC основи з guard_weeks додатковими помилковими тижнями (типово один тиждень за всі контрольні сезони разом).
 # Обирається найменша сумарна помилка; при рівності вищий MCC; при рівності і MCC набір з recommended_min (5) і більше
 # сезонів, бо автори MEM радять 5-10 сезонів; далі коротший набір.
+# Кут, яким визначаються межі епідемії ("істина") для території. "auto": кут з найвищим MCC перехресної перевірки mem
+# (memgoodness) на всіх доступних сезонах території, тобто спосіб авторів MEM. Визначається один раз на всіх сезонах,
+# щоб усі набори сезонів і всі кути порогу перевірялись проти тих самих меж епідемії.
+mo_truth_angle <- function(d, cfg) {
+  ta <- cfg$angle$truth_angle
+  if (!identical(ta, "auto")) return(as.numeric(ta))
+  grid <- mo_angle_grid(cfg)
+  m <- vapply(grid, function(a) unname(mo_good_vec(d, a, cfg$angle$min_seasons_goodness)["mcc"]), numeric(1))
+  if (all(is.na(m))) return(cfg$angle$default)
+  best <- max(m, na.rm = TRUE)
+  cand <- grid[!is.na(m) & m >= best - 1e-9]
+  cand[which.min(abs(cand - cfg$angle$default))]
+}
+
 mo_select_seasons <- function(d, cfg) {
+  cfg$angle$truth_angle <- mo_truth_angle(d, cfg)
   ss <- cfg$season_selection; S <- names(d); N <- length(S)
   era <- S[S >= ss$era_start]; nE <- length(era)
   V <- setdiff(era, ss$not_validation)
-  one <- function(set, note) list(seasons = set, eval_seasons = if (length(V)) V else NULL, note = note,
+  one <- function(set, note) list(seasons = set, eval_seasons = if (length(V)) V else NULL, note = note, truth_angle = cfg$angle$truth_angle,
     table = data.frame(n_available = N, n_seasons = length(set), seasons_used = paste(set, collapse = ", "), eval_seasons = paste(V, collapse = ", "),
                        angle = NA, base = NA, medium = NA, mcc = NA, fa = NA, delay = NA, loss = NA, allowed = NA, chosen = TRUE, note = note))
   if (!isTRUE(ss$enabled)) return(one(S, "добір сезонів вимкнено, взято всі"))
-  if (nE >= ss$era_full) return(one(era, paste0("сезонів нинішньої епохи ", nE, ", не менше ", ss$era_full, ": старші не розглядаються")))
-  kmin <- max(ss$min_seasons, nE)
+  # поки сезонів нинішнього періоду менше era_full, основа це всі вони; коли їх era_full і більше, щороку порівнюються
+  # набори з recommended_min (5) до N (не більше 10) найновіших сезонів
+  kmin <- if (nE >= ss$era_full) ss$recommended_min else max(ss$min_seasons, nE)
   if (N <= kmin || !length(V)) return(one(S, paste0("доступно ", N, " сезонів, вибирати немає з чого: взято всі")))
   rows <- lapply(kmin:N, function(k) {
     sub <- tail(S, k); ch <- mo_choose_angle(d[, sub, drop = FALSE], cfg, eval_seasons = V)
@@ -398,7 +417,7 @@ mo_select_seasons <- function(d, cfg) {
   }
   tab$allowed <- tab$allowed & guard
   tab$chosen <- tab$n_seasons == pick; tab$note <- ifelse(tab$chosen, note, ifelse(guard, "", paste0("MCC нижчий, ніж в основи з ", ss$guard_weeks, " додатковим помилковим тижнем")))
-  list(seasons = tail(S, pick), eval_seasons = V, note = note, table = tab)
+  list(seasons = tail(S, pick), eval_seasons = V, note = note, table = tab, truth_angle = cfg$angle$truth_angle)
 }
 
 # Кут власного порогу малої території: найвищий кут не вище стелі (кута групи), при якому епідемічний поріг
@@ -443,6 +462,7 @@ mo_stability <- function(d, angle, min_n = 5) {
 # Усе для однієї основної території: кут, пороги, вплив, стабільність
 mo_territory <- function(item, cfg) {
   t <- item$row; d <- item$d
+  if (!is.null(item$truth_angle)) cfg$angle$truth_angle <- item$truth_angle
   ch <- mo_choose_angle(d, cfg, item$eval_seasons)
   tv <- mo_thr_vec(mo_thr_model(d, ch$angle)); gv <- mo_good_vec(d, ch$angle, cfg$angle$min_seasons_goodness)
   inf <- mo_influence(d, ch$angle)
@@ -507,9 +527,16 @@ mo_hrom_prep <- function(h, ser, cfg, terr) {
        med_cases = median(unlist(dm) * h$population / 1e5, na.rm = TRUE))
 }
 
+# Кут меж епідемії для малої території: той самий, що в її еталона (ряди громад надто шумні, щоб обирати власний)
+mo_p_truth <- function(p, cfg) {
+  a <- cfg$.truth[[p$refid]]
+  if (is.null(a)) a <- cfg$angle$truth_angle
+  if (identical(a, "auto")) cfg$angle$default else as.numeric(a)
+}
+
 # Крок 1: результати власного порогу для кожного кута (для вибору кута за групою)
 mo_hrom_angle_scan <- function(p, cfg) {
-  d <- p$d; S <- names(d); truth <- cfg$angle$truth_angle
+  d <- p$d; S <- names(d); truth <- mo_p_truth(p, cfg)
   tms <- lapply(S, function(s) { y <- d[[s]]; if (sum(!is.na(y)) >= 10) mo_timing(y, truth) else NULL }); names(tms) <- S
   do.call(rbind, lapply(mo_angle_grid(cfg), function(a) {
     ev <- mo_loso_eval(d, a, truth, tms)
@@ -521,7 +548,7 @@ mo_hrom_angle_scan <- function(p, cfg) {
 # Крок 2: пороги всіх способів на повних даних і на кожному відкладеному сезоні
 mo_hrom_thresholds <- function(j, cfg) {
   p <- j$p; own_angle <- j$own_angle; ref_angle <- j$ref_angle
-  d <- p$d; S <- names(d); truth <- cfg$angle$truth_angle; refd <- p$refd
+  d <- p$d; S <- names(d); truth <- mo_p_truth(p, cfg); refd <- p$refd
   cache <- new.env()
   ref_thr <- function(drop_season = NULL) {
     key <- paste0("k_", paste(drop_season, collapse = "|"))
@@ -634,7 +661,7 @@ mo_small_areas <- function(cfg, terr, ser, tabs, log) {
     for (s in S) {
       y <- d[, s]; z <- refd[rownames(d), s]; ok <- !is.na(y) & !is.na(z)
       r_s <- c(r_s, if (sum(ok) >= 8) cor(y[ok], z[ok]) else NA)
-      tm <- if (sum(!is.na(y)) >= 10) mo_timing(y, cfg$angle$truth_angle) else NULL
+      tm <- if (sum(!is.na(y)) >= 10) mo_timing(y, mo_p_truth(p, cfg)) else NULL
       if (is.null(tm) || any(is.na(tm))) { fa <- c(fa, NA); dl <- c(dl, NA); ms <- c(ms, NA); next }
       e <- mo_eval(y, th$own[1], tm[1], tm[2]); fa <- c(fa, e["fa"]); dl <- c(dl, e["delay"]); ms <- c(ms, e["miss"])
     }
@@ -779,12 +806,18 @@ mo_changes <- function(thr_new, out_dir, cfg) {
   old <- read.csv(f, stringsAsFactors = FALSE, encoding = "UTF-8")
   arch <- file.path(out_dir, "archive"); dir.create(arch, showWarnings = FALSE)
   file.copy(f, file.path(arch, paste0("memopt_thresholds_", format(file.mtime(f), "%Y-%m-%d_%H%M"), ".csv")), overwrite = TRUE)
-  m <- merge(thr_new[, c("id", "name", "seasons_used", "base", "medium")], old[, c("id", "seasons_used", "base", "medium")], by = "id", all.x = TRUE, suffixes = c("", "_prev"))
+  if (!("infl_max_pct" %in% names(old))) old$infl_max_pct <- NA
+  m <- merge(thr_new[, c("id", "name", "seasons_used", "base", "medium", "infl_max_pct")], old[, c("id", "seasons_used", "base", "medium", "infl_max_pct")],
+             by = "id", all.x = TRUE, suffixes = c("", "_prev"))
   m$pct_base <- (m$base / m$base_prev - 1) * 100
   m$pct_medium <- (m$medium / m$medium_prev - 1) * 100
-  lim <- cfg$report$change_flag_pct
+  # Щороку до набору додається один сезон, тому звичайна зміна порогу не більша за найбільший вплив одного сезону
+  # (на скільки змінюється поріг, якщо прибрати з набору один сезон). Межа береться з попереднього запуску, якщо вона там є.
+  m$flag_limit <- ifelse(is.na(m$infl_max_pct_prev), m$infl_max_pct, m$infl_max_pct_prev)
+  big <- !is.na(m$flag_limit) & abs(m$pct_base) > m$flag_limit
   m$note <- ifelse(is.na(m$base_prev), "нова територія",
-    ifelse(abs(m$pct_base) > lim | abs(m$pct_medium) > lim, paste0("зміна понад ", lim, "%: перевірте"), ""))
+    ifelse(big, paste0("зміна більша за вплив будь-якого одного сезону (до ", round(m$flag_limit), "%): перевірте дані"), ""))
+  m$infl_max_pct <- NULL; m$infl_max_pct_prev <- NULL
   m[order(-pmax(abs(m$pct_base), abs(m$pct_medium), na.rm = TRUE)), ]
 }
 
@@ -822,10 +855,12 @@ mo_run <- function(cfg_path) {
   nera <- sum(unique(unlist(lapply(ser, names))) >= cfg$season_selection$era_start)
   if (nera < cfg$season_selection$era_full) cat("  Увага: сезонів від", cfg$season_selection$era_start, "лише", nera, "; пороги громад, що мають дані лише за ці сезони, менш надійні, ніж на", cfg$season_selection$era_full, "і більше сезонах\n")
   cfg$.season_sets <- sets
+  cfg$.truth <- lapply(sel, `[[`, "truth_angle")
   writeLines(jsonlite::toJSON(sets, auto_unbox = FALSE, pretty = TRUE), file.path(out_dir, "season_sets.json"), useBytes = TRUE)
 
   cat("2. Основні території: кут, пороги, вплив сезонів, стабільність\n"); flush.console()
-  items <- lapply(seq_len(nrow(series_terr)), function(i) list(row = series_terr[i, ], d = ser[[series_terr$id[i]]], eval_seasons = sel[[series_terr$id[i]]]$eval_seasons))
+  items <- lapply(seq_len(nrow(series_terr)), function(i) list(row = series_terr[i, ], d = ser[[series_terr$id[i]]], eval_seasons = sel[[series_terr$id[i]]]$eval_seasons,
+                                                         truth_angle = sel[[series_terr$id[i]]]$truth_angle))
   tr <- mo_pmap(items, mo_territory, cfg)
   tabs <- do.call(rbind, lapply(tr, `[[`, "res"))
   scans <- do.call(rbind, lapply(tr, `[[`, "scan"))
@@ -871,9 +906,14 @@ mo_run <- function(cfg_path) {
   # паспорт порогу основної території: контрольні сезони, якість, помилка і як обрано набір
   pk <- season_pick[season_pick$chosen, ]
   thr_all$eval_seasons <- pk$eval_seasons[match(thr_all$id, pk$id)]
-  thr_all$mcc <- round(tabs$mcc[match(thr_all$id, tabs$id)], 3)
+  thr_all$mcc <- round(pk$mcc[match(thr_all$id, pk$id)], 3)
+  # найбільший вплив одного сезону на епідемічний поріг, %: для основної території з її набору, для малої з її еталона
+  imax <- tapply(abs(infl$pct_base), infl$id, max, na.rm = TRUE)
+  rid <- ifelse(thr_all$kind == "основна", thr_all$id, terr$reference_id[match(thr_all$id, terr$id)])
+  thr_all$infl_max_pct <- round(as.numeric(imax[rid]), 1)
   thr_all$loss <- pk$loss[match(thr_all$id, pk$id)]
   thr_all$note <- pk$note[match(thr_all$id, pk$id)]
+  thr_all$truth_angle <- vapply(thr_all$id, function(id) if (!is.null(sel[[id]])) as.numeric(sel[[id]]$truth_angle) else NA_real_, numeric(1))
   changes <- mo_changes(thr_all, out_dir, cfg)
   write.csv(thr_all, file.path(out_dir, "memopt_thresholds.csv"), row.names = FALSE, fileEncoding = "UTF-8")
 
@@ -926,7 +966,9 @@ mo_run <- function(cfg_path) {
                                    "максимум сезонів у розрахунку", "добір сезонів основних територій", "випуск"),
     значення = c(mo_def(cfg$project, ""),
                  paste(c(paste0(names(MO_AUTO_EXCLUDE), " (", MO_AUTO_EXCLUDE, ", завжди)"),
-                         if (length(cfg$exclude_seasons)) paste0(names(cfg$exclude_seasons), " (", unlist(cfg$exclude_seasons), ", виключено користувачем)")), collapse = "; "),
+                         if (length(cfg$exclude_seasons)) paste0(names(cfg$exclude_seasons), " (", unlist(cfg$exclude_seasons), ", виключено користувачем)"),
+                         if (length(cfg$exclude_territory_seasons)) unlist(lapply(names(cfg$exclude_territory_seasons), function(id) { e <- cfg$exclude_territory_seasons[[id]]
+                           paste0(names(e), " лише для ", id, " (", unlist(e), ", виключено користувачем)") }))), collapse = "; "),
                  paste(cfg$angle$min, cfg$angle$max, cfg$angle$step, sep = ", "), cfg$angle$criterion,
                  paste(cfg$angle$weights$false_alert, cfg$angle$weights$delay, sep = " : "), cfg$angle$truth_angle, cfg$angle$stability_drop,
                  if (has_small) paste(names(hr$angle_by_tier), hr$angle_by_tier, sep = " = ", collapse = "; ") else "немає малих територій",
