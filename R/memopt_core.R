@@ -107,6 +107,7 @@ mo_load_config <- function(path) {
   ss$era_full <- mo_def(ss$era_full, 5)
   ss$not_validation <- mo_def(ss$not_validation, "2023/2024")
   ss$guard_weeks <- mo_def(ss$guard_weeks, 1)
+  ss$recommended_min <- mo_def(ss$recommended_min, 5)
   cfg$season_selection <- ss
   # Межі епідемії за рішенням користувача (тижні початку і кінця) замість memtiming для окремих сезонів
   if (is.null(cfg$epidemic_periods)) cfg$epidemic_periods <- list()
@@ -363,7 +364,8 @@ mo_choose_angle <- function(d, cfg, eval_seasons = NULL) mo_select_angle(mo_scan
 # сума за всіма контрольними сезонами. MCC кожного кандидата рахується на тих самих контрольних сезонах і тим самим
 # способом (тижні над порогом проти тижнів епідемії). Запобіжник: кандидат відкидається, якщо його MCC нижчий, ніж
 # був би MCC основи з guard_weeks додатковими помилковими тижнями (типово один тиждень за всі контрольні сезони разом).
-# Обирається найменша сумарна помилка; при рівності вищий MCC; далі коротший набір.
+# Обирається найменша сумарна помилка; при рівності вищий MCC; при рівності і MCC набір з recommended_min (5) і більше
+# сезонів, бо автори MEM радять 5-10 сезонів; далі коротший набір.
 mo_select_seasons <- function(d, cfg) {
   ss <- cfg$season_selection; S <- names(d); N <- length(S)
   era <- S[S >= ss$era_start]; nE <- length(era)
@@ -390,9 +392,9 @@ mo_select_seasons <- function(d, cfg) {
   guard[1] <- TRUE
   cand <- tab$allowed & !is.na(tab$loss) & guard
   if (!any(cand)) { pick <- kmin; note <- "жоден набір не дав допустимого кута, взято основу" } else {
-    o <- order(tab$loss, -ifelse(is.na(tab$mcc), -Inf, tab$mcc), tab$n_seasons)
+    o <- order(tab$loss, -round(ifelse(is.na(tab$mcc), -Inf, tab$mcc), 6), tab$n_seasons < ss$recommended_min, tab$n_seasons)
     pick <- tab$n_seasons[o[cand[o]][1]]
-    note <- "найменша сумарна помилка на контрольних сезонах; при рівності вищий MCC"
+    note <- paste0("найменша сумарна помилка на контрольних сезонах; при рівності вищий MCC; при рівності і MCC набір з ", ss$recommended_min, " і більше сезонів (рекомендація авторів MEM), далі коротший")
   }
   tab$allowed <- tab$allowed & guard
   tab$chosen <- tab$n_seasons == pick; tab$note <- ifelse(tab$chosen, note, ifelse(guard, "", paste0("MCC нижчий, ніж в основи з ", ss$guard_weeks, " додатковим помилковим тижнем")))
@@ -934,7 +936,7 @@ mo_run <- function(cfg_path) {
                  paste(cfg$small_areas$groups$reliable_min, cfg$small_areas$groups$limited_min, sep = ", "), cfg$season$max_seasons,
                  with(cfg$season_selection, if (isTRUE(enabled)) paste0("увімкнено: основа всі сезони від ", era_start, ", поки їх менше ", era_full,
                    " додаються старші підряд від найновішого (не більше ", cfg$season$max_seasons, " разом, мінімум ", min_seasons, "); контрольні сезони від ", era_start,
-                   " крім ", paste(not_validation, collapse = ", "), "; найменша сумарна помилка, при рівності вищий MCC на контрольних сезонах; набір відкидається, якщо його MCC нижчий, ніж в основи з ", guard_weeks, " додатковим помилковим тижнем",
+                   " крім ", paste(not_validation, collapse = ", "), "; найменша сумарна помилка, при рівності вищий MCC на контрольних сезонах, далі набір з ", recommended_min, " і більше сезонів; набір відкидається, якщо його MCC нижчий, ніж в основи з ", guard_weeks, " додатковим помилковим тижнем",
                    if (length(cfg$epidemic_periods)) paste0("; межі епідемії за рішенням користувача: ", paste0(names(cfg$epidemic_periods), " тижні ", vapply(cfg$epidemic_periods, function(p) paste(p, collapse = "-"), ""), collapse = "; ")) else "")
                    else "вимкнено: усі сезони після виключень"),
                  paste0("memopt 0.3, ", format(Sys.time(), "%Y-%m-%d %H:%M"))))

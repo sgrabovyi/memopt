@@ -57,7 +57,8 @@
     "not_validation": [
       "2023/2024"
     ],
-    "guard_weeks": 1
+    "guard_weeks": 1,
+    "recommended_min": 5
   },
   "season_subsets": {
     "min_seasons": 5
@@ -74,12 +75,6 @@
   },
   "parallel": {
     "workers": 6
-  },
-  "epidemic_periods": {
-    "2025/2026": [
-      2,
-      12
-    ]
   },
   "report": {
     "change_flag_pct": 25
