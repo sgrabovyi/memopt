@@ -1,4 +1,4 @@
-# Рисунки для статті. Усі дані беруться з output/ memopt (5 сезонів), крім рис. 4, де числа восьмисезонного
+# Рисунки для статті. Усі дані беруться з output/ memopt, крім рис. 4, де числа восьмисезонного
 # розрахунку взято з попереднього запуску (config_8seasons_backup.json), див. коментар.
 import os
 import numpy as np, pandas as pd
@@ -25,8 +25,8 @@ def series(id_, S):
     return s.values
 
 
-# ---------- Рис. 1: область, п'ять сезонів і пороги
-seasons = sorted(F[F.id == "UA59"].season.unique())
+# ---------- Рис. 1: область, сезони, з яких побудовано пороги, і самі пороги
+seasons = T.loc["UA59", "seasons_used"].split(", ")
 fig, ax = plt.subplots(figsize=(7.2, 3.6))
 cols = plt.cm.viridis(np.linspace(0, 0.9, len(seasons)))
 for s, c in zip(seasons, cols):
@@ -67,7 +67,8 @@ for i in range(len(WEEKS)):
     if own_mid[i] and not gate[i]:
         ax.axvspan(i - 0.5, i + 0.5, color="#bbbbbb", alpha=0.5, lw=0)
 ax.set_ylabel("Громада, на 100 тис.")
-ax.set_title(f"Новослобідська сільська громада, сезон {S}. Сірим позначено тижні, у які діє правило підтвердження районом", fontsize=9)
+ax.set_title(f"Новослобідська сільська громада, сезон {S}", fontsize=9)
+ax.set_ylim(0, np.nanmax(h) * 1.35)
 ax.legend(fontsize=7, ncol=3, frameon=False, loc="upper left")
 ax = axes[1]
 ax.plot(range(len(WEEKS)), r, color="#1f77b4", lw=1.4, marker="o", ms=3, label="Конотопський район без центру")
