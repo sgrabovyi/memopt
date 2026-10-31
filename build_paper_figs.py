@@ -89,7 +89,7 @@ w8 = {"UA5902_nc": 25, "UA5906_nc": 14, "UA5908_nc": 1, "UA5910_nc": 1, "UA5904_
 w5 = {}
 for i in ids:
     s = series(i, "2025/2026"); w5[i] = int(np.nansum(s >= T.loc[i, "base"]))
-print("тижнів над епідемічним порогом 2025/26 (5 сезонів):", w5)
+print("тижнів над епідемічним порогом 2025/26 (обрані набори сезонів):", w5)
 fig, ax = plt.subplots(figsize=(7.2, 3.4))
 y = np.arange(len(ids))
 ax.barh(y - 0.2, [w8[i] for i in ids], 0.4, color="#bbbbbb", label="пороги на 8 сезонах (2012/13 до 2025/26)")

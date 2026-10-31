@@ -17,7 +17,7 @@ SLIM = os.environ.get("MO_SLIM") == "1"  # полегшена версія дл�
 OUT = os.path.join(HERE, "output", "Пороги_2026-27_і_підтвердження_районом" + ("_slim" if SLIM else "") + ".xlsx")
 T = pd.read_csv(os.path.join(HERE, "output", "memopt_thresholds.csv"))
 G = pd.read_excel(os.path.join(HERE, "output", "Пороги_для_гугл_таблиці.xlsx"))
-FLAG = dict(zip(G.iloc[:, 0], G["Потрібне підтвердження районом"]))
+FLAG = dict(zip(G.iloc[:, 0], G["Правило підтвердження районом"]))
 REF = dict(zip(G.iloc[:, 0], G["Еталон (як у колонці A)"]))
 
 WEEKS = [f"w-26/{w}" for w in range(40, 53)] + [f"w-27/{w:02d}" for w in range(1, 20)]  # 32 тижні, як у книгах DW
@@ -108,7 +108,7 @@ if not SLIM:
   ws0.column_dimensions["A"].width = 150
 
 wsP = wb.create_sheet("Пороги") if not SLIM else None
-cols = ["Територія", "Вид", "Еталон", "Потрібне підтвердження районом", "Епідемічний поріг", "Середній поріг", "Високий поріг", "Дуже високий поріг"]
+cols = ["Територія", "Вид", "Еталон", "Правило підтвердження районом", "Епідемічний поріг", "Середній поріг", "Високий поріг", "Дуже високий поріг"]
 for j, c in enumerate(cols if not SLIM else [], 1):
     wsP.cell(row=1, column=j, value=c).font = Font(bold=True)
 r = 2
