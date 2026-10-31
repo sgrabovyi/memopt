@@ -29,7 +29,6 @@ STEPS = [
     ("Правило підтвердження районом", [sys.executable, "build_gate_report.py"]),
     ("Ряди для memapp", [R, "build_memapp_series.R"]),
     ("Пороги для гугл-таблиці (xlsx і csv)", [sys.executable, "build_google_sheet.py"]),
-    ("Таблиця порогів у Word", [sys.executable, "build_thresholds_table.py"]),
     ("Книга правила для Google Таблиць", [sys.executable, "build_google_rule_sheet.py"]),
     ("Показники за тижнями", [sys.executable, "build_weekly_excel.py"]),
     ("Рисунки", [sys.executable, "build_paper_figs.py"]),
