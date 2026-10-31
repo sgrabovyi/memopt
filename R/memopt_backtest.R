@@ -42,7 +42,7 @@ mo_backtest <- function(cfg_path, season, st, en) {
       autumn_median_pct_of_base = 100 * median(y[seq_len(ps - 1)], na.rm = TRUE) / th["base"], row.names = NULL)
   }
   ins <- do.call(rbind, rows); write.csv(ins, file.path(out_dir, paste0(tag, "_in_sample.csv")), row.names = FALSE, fileEncoding = "UTF-8")
-  # 2. пороги без цього сезону (сезон схований): основні території
+  # 2. пороги без цього сезону (сезон відкладений): основні території
   tabs <- readRDS(file.path(cfg$.path(cfg$paths$output_dir), "last_run.rds"))$tabs
   hold_main <- list()
   for (i in which(terr$kind == "main")) {
@@ -61,16 +61,19 @@ mo_backtest <- function(cfg_path, season, st, en) {
     preps <- lapply(seq_len(nrow(hs)), function(i) mo_hrom_prep(hs[i, ], ser, cfg, terr))
     tier <- vapply(preps, function(p) mo_tier(p$med_cases, cfg), character(1))
     ang_map <- setNames(tabs$angle, tabs$id)
-    jobs <- Map(function(p, tr) list(p = p, own_angle = hr$angle_by_tier[[tr]], ref_angle = ang_map[[p$refid]]), preps, tier)
+    # кут власного порогу і придатність власного порогу беруться з робочого розрахунку (так само, як у memopt_core)
+    own_ang <- hr$main$angle_own[match(vapply(preps, function(p) p$h$id, ""), hr$main$id)]
+    usable <- as.logical(hr$main$own_usable[match(vapply(preps, function(p) p$h$id, ""), hr$main$id)]); usable[is.na(usable)] <- FALSE
+    jobs <- Map(function(p, a) list(p = p, own_angle = a, ref_angle = ang_map[[p$refid]]), preps, own_ang)
     res <- mo_pmap(jobs, mo_hrom_job, cfg)
-    ths <- list(); for (r in res) for (x in r$hold) if (x$held == season) ths[[length(ths) + 1]] <- x$th
+    ths <- list(); for (i in seq_along(res)) if (usable[i]) for (x in res[[i]]$hold) if (x$held == season) ths[[length(ths) + 1]] <- x$th
     fit <- mo_pool_fit(log(vapply(ths, function(t) t$own[1], numeric(1))), log(vapply(ths, function(t) t$refk[1], numeric(1))), vapply(ths, function(t) t$cases, numeric(1)))
     out <- list()
     for (i in seq_along(res)) {
       r <- res[[i]]; p <- r$p; y <- p$d[[season]]; h <- NULL
       for (x in r$hold) if (x$held == season) h <- x
       if (is.null(h)) next
-      m <- mo_methods(h$th, tier[i], mo_pool_w(fit, h$th$cases))
+      m <- mo_methods(h$th, tier[i], if (usable[i]) mo_pool_w(fit, h$th$cases) else 0)
       for (nm in names(m)) { b <- unname(m[[nm]][1]); e <- mo_bt_eval(y, b, wk, st, en)
         out[[length(out) + 1]] <- data.frame(id = p$h$id, name = p$h$name, tier = tier[i], method = nm, base = b, fa = e["fa"], delay = e["delay"], miss = e["miss"], row.names = NULL) }
     }

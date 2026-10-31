@@ -16,15 +16,13 @@
     "max_seasons": 10
   },
   "placeholder_seasons": [],
-  "exclude_seasons": {
-    "2020/2021": "приклад: причина виключення сезону"
-  },
+  "exclude_seasons": {},
   "angle": {
     "min": 2.0,
     "max": 4.0,
     "step": 0.25,
     "default": 2.8,
-    "min_seasons_goodness": 5,
+    "min_seasons_goodness": 3,
     "criterion": "loss",
     "weights": {
       "false_alert": 1,
@@ -40,7 +38,8 @@
       "reliable_min": 14,
       "limited_min": 6
     },
-    "groups_window_seasons": null
+    "groups_window_seasons": null,
+    "angle_rule": "base_below_medium"
   },
   "start_cleaning": {
     "enabled": true,
@@ -50,9 +49,14 @@
   },
   "season_selection": {
     "enabled": true,
-    "min_seasons": 5,
-    "validation_seasons": 5,
-    "tolerance": 0
+    "min_seasons": 3,
+    "era_start": "2023/2024",
+    "era_full": 5,
+    "not_validation": [
+      "2023/2024"
+    ],
+    "guard_weeks": 1,
+    "recommended_min": 5
   },
   "season_subsets": {
     "min_seasons": 5
@@ -69,5 +73,6 @@
   },
   "parallel": {
     "workers": 4
-  }
+  },
+  "exclude_territory_seasons": {}
 }

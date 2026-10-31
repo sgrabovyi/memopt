@@ -8,7 +8,7 @@ echo Calculation started %date% %time%. It takes 3 to 10 minutes, keep this wind
 if errorlevel 1 (
   echo.
   echo The calculation stopped with an error. Read the message above. If it says "there is no package called",
-  echo run 2_Vstanovyty_pakety.bat first.
+  echo run 2_Встановити_пакети.bat first.
 ) else (
   echo.
   echo Done %date% %time%. Results: output\memopt_results.xlsx and output\memopt_thresholds.csv

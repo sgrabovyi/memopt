@@ -1,5 +1,5 @@
 @echo off
-rem Step 4 (optional): rebuilds the Word documents from the results workbook. Needs Python 3.10+ with the packages
+rem Step 4 (optional): rebuilds all Word documents and workbooks from the results and checks the texts. Needs Python 3.10+ with the packages
 rem from requirements.txt (pip install -r requirements.txt). Run after step 3.
 chcp 65001 >nul
 cd /d "%~dp0"
@@ -16,19 +16,14 @@ if not defined PY (
   echo Installing Python packages from requirements.txt
   %PY% -m pip install -r "%~dp0requirements.txt"
 )
-echo Examples for the manual (R)
 call "%~dp0_find_r.cmd" || exit /b 1
-"%RSCRIPT%" "%~dp0R\memopt_examples.R"
-echo Parameters document
-%PY% build_params_doc.py
-echo Manual
-%PY% build_manual.py
-echo Workbook report
-%PY% build_report.py
-echo District confirmation rule document
-%PY% build_gate_report.py
-echo Series for memapp (R)
-"%RSCRIPT%" "%~dp0build_memapp_series.R"
-echo.
-echo Done. Documents are in the docs folder.
+echo Building all documents and workbooks, then checking the texts
+%PY% build_all.py
+if errorlevel 1 (
+  echo.
+  echo Some step failed or the text check found problems. Read the messages above.
+) else (
+  echo.
+  echo Done. Documents are in the docs folder, workbooks in the output folder.
+)
 pause

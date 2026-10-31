@@ -1,4 +1,4 @@
-# memopt: підбір порогів MEM (метод рухомої епідемії) для захворюваності на ГРВІ, версія 0.3
+# memopt: підбір порогів MEM (метод рухомої епідемії) для захворюваності на ГРВІ, версія 0.4
 # Працює поверх пакета mem (Vega, Lozano та ін.), сам mem не змінює.
 # Автор налаштувань: Сергій Грабовий. Ліцензія: GPL (>= 2), як у mem.
 
@@ -14,7 +14,7 @@ suppressPackageStartupMessages({
 # Назви аркушів книги результатів
 MO_SHEETS <- list(main = "Основні території", small = "Малі території", quality = "Якість малих територій", angle = "Кут нахилу",
   floor = "Межа кута", group_angle = "Кут за групами малих територій", influence = "Вплив сезонів", stability = "Стабільність наборів",
-  cleaning = "Очищення початку", hold_groups = "Перевірка відкладений сезон", hold_all = "Перевірка усі разом", weights = "Ваги малих територій",
+  cleaning = "Очищення початку", hold_groups = "Відкладені сезони за групами", hold_all = "Відкладені сезони усі разом", weights = "Ваги малих територій",
   proportionality = "Пропорційність", waves = "Багато хвиль", thresholds = "Пороги", dim = "Експорт Dim_Thresholds", config = "Конфігурація",
   season_pick = "Добір сезонів", changes = "Зміни порогів", input_check = "Перевірка даних")
 
@@ -46,7 +46,7 @@ MO_LABELS <- c(id = "Код", name = "Назва", level = "Рівень", seaso
   n_seasons = "Сезонів у наборі", eval_seasons = "Контрольні сезони", mcc_floor = "Найнижчий дозволений MCC",
   ctl_tp = "Тижні епідемії над порогом", ctl_fp = "Тижні поза епідемією над порогом", ctl_fn = "Тижні епідемії під порогом", ctl_tn = "Тижні поза епідемією під порогом", note = "Примітка", n_available = "Сезонів доступно",
   seasons_used_prev = "Сезони попереднього запуску", base_prev = "Попередній епідемічний поріг", medium_prev = "Попередній середній поріг",
-  pct_medium = "Зміна середнього порогу, %", flag_limit = "Найбільший вплив одного сезону, %", mcc_ctl = "MCC на контрольних сезонах", truth_angle = "Кут для меж епідемії", noepi = "Сезони без епідемії (пік нижчий за епідемічний поріг)", infl_max_pct = "Найбільший вплив одного сезону, %", weeks_missing = "Пропущено тижнів усередині сезону", weeks_zero = "Нульових тижнів",
+  pct_medium = "Зміна середнього порогу, %", flag_limit = "Найбільший вплив одного сезону, %", mcc_ctl = "MCC на контрольних сезонах", fa_ctl_sum = "Хибних сигналів за контрольні сезони", delay_ctl_sum = "Запізнення за контрольні сезони, тижнів", loss_ctl_sum = "Сумарна помилка за контрольні сезони (хибні сигнали + запізнення)", truth_angle = "Кут для меж епідемії", noepi = "Сезони без епідемії (пік нижчий за епідемічний поріг)", infl_max_pct = "Найбільший вплив одного сезону, %", weeks_missing = "Пропущено тижнів усередині сезону", weeks_zero = "Нульових тижнів",
   peak_ratio = "Пік до звичного піку")
 
 # ---------------------------------------------------------------- налаштування
@@ -109,8 +109,6 @@ mo_load_config <- function(path) {
   ss$guard_weeks <- mo_def(ss$guard_weeks, 1)
   ss$recommended_min <- mo_def(ss$recommended_min, 5)
   cfg$season_selection <- ss
-  # Межі епідемії за рішенням користувача (тижні початку і кінця) замість memtiming для окремих сезонів
-  if (is.null(cfg$epidemic_periods)) cfg$epidemic_periods <- list()
   # виключення сезону лише для однієї території (вади даних): {"код території": {"сезон": "причина"}}
   if (is.null(cfg$exclude_territory_seasons)) cfg$exclude_territory_seasons <- list()
   # набори сезонів, обрані попереднім запуском (output/season_sets.json): їх бачать ретроспектива, приклади і книга для memapp
@@ -241,18 +239,18 @@ mo_timing <- function(y, angle) {
   c(start = tm$optimum.map[4], end = tm$optimum.map[5])
 }
 
-# Межі епідемії сезону s: задані користувачем (cfg$epidemic_periods, тижні початку і кінця), інакше memtiming
-mo_season_timing <- function(y, s, cfg) {
-  p <- cfg$epidemic_periods[[s]]
-  if (!is.null(p)) {
-    w <- mo_weeks(cfg); tm <- c(start = match(p[1], w), end = match(p[2], w))
-    return(if (any(is.na(tm))) NULL else tm)
-  }
+# Межі епідемії сезону: memtiming стандартним кутом truth_angle (2,8), однаково для всіх територій і сезонів
+mo_season_timing <- function(y, cfg) {
   if (sum(!is.na(y)) >= 10) mo_timing(y, cfg$angle$truth_angle) else NULL
 }
 
 # Результат порогу T на одному сезоні: хибні сигнали, запізнення (якщо поріг не перевищено, запізнення дорівнює тривалості епідемічного періоду), пропуск
-mo_season_result <- function(y, T, tm) {
+mo_season_result <- function(y, T, tm, noepi = FALSE) {
+  if (noepi) {
+    ok <- !is.na(y)
+    if (is.na(T)) return(c(failed = 1, fa = 0, delay = 0, miss = 0, len = 0, tp = 0, fn = 0, tn = NA))
+    return(c(failed = 0, fa = sum(ok & y > T), delay = 0, miss = 0, len = 0, tp = 0, fn = 0, tn = sum(ok & y <= T)))
+  }
   len <- unname(tm[2] - tm[1] + 1)
   if (is.na(T)) return(c(failed = 1, fa = 0, delay = len, miss = 1, len = len, tp = NA, fn = NA, tn = NA))
   e <- mo_eval(y, T, tm[1], tm[2])
@@ -260,14 +258,12 @@ mo_season_result <- function(y, T, tm) {
     tp = unname(e["tp"]), fn = unname(e["fn"]), tn = unname(e["tn"]))
 }
 
-# Перевірка "поріг з решти сезонів на відкладеному сезоні" для заданого кута побудови порогу.
-# eval_d (необов'язково): ряди для оцінки схованого сезону (наприклад, без очищення початку).
 # Сезони без епідемії для території: пік сезону не досягає епідемічного порогу (визначення MEM: нижче епідемічного
 # порогу епідемії немає; між епідемічним і середнім порогом це епідемія низької інтенсивності). Поріг будується один раз
 # стандартним кутом за всіма іншими доступними сезонами території, тому рішення не залежить від кута і набору сезонів,
 # які перевіряються (інакше високий поріг сам оголошував би сезони неепідемічними і здавався б кращим).
 mo_noepi_seasons <- function(d, cfg, seasons = names(d)) {
-  a <- cfg$angle$truth_angle; if (identical(a, "auto")) a <- cfg$angle$default
+  a <- cfg$angle$truth_angle
   S <- names(d); out <- character(0)
   for (s in intersect(seasons, S)) {
     y <- d[[s]]; if (sum(!is.na(y)) < 10 || length(S) < 3) next
@@ -277,9 +273,10 @@ mo_noepi_seasons <- function(d, cfg, seasons = names(d)) {
   out
 }
 
-mo_loso_eval <- function(d, angle, truth, tms = NULL, eval_d = NULL, eval_seasons = NULL, noepi = character(0)) {
+# Перевірка "поріг з решти сезонів на відкладеному сезоні" для заданого кута побудови порогу
+mo_loso_eval <- function(d, angle, truth, tms = NULL, eval_seasons = NULL, noepi = character(0)) {
   S <- names(d); out <- list()
-  ed <- if (is.null(eval_d)) d else eval_d
+  ed <- d
   for (s in if (is.null(eval_seasons)) S else S[S %in% eval_seasons]) {
     tv <- mo_thr_vec(mo_thr_model(d[, setdiff(S, s), drop = FALSE], angle))
     T <- unname(tv["base"]); y <- ed[[s]]
@@ -300,7 +297,7 @@ mo_loso_eval <- function(d, angle, truth, tms = NULL, eval_d = NULL, eval_season
   if (length(out)) do.call(rbind, out) else NULL
 }
 
-# MCC за тижнями: епідемія (за межами епідемічного періоду) проти "вище порогу"
+# MCC за тижнями: епідемія (у межах епідемічного періоду) проти "вище порогу"
 mo_mcc <- function(tp, fp, fn, tn) {
   den <- sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
   if (is.na(den) || den == 0) NA_real_ else (tp * tn - fp * fn) / den
@@ -325,7 +322,7 @@ mo_loss <- function(ev, cfg) {
 # ---------------------------------------------------------------- вибір кута
 mo_angle_grid <- function(cfg) seq(cfg$angle$min, cfg$angle$max, by = cfg$angle$step)
 
-# Найнижчий кут, до якого можна опускатись від стандартного кута (2,8) вниз: базовий рівень
+# Найнижчий кут, до якого можна опускатись від стандартного кута (2,8) вниз: епідемічний поріг
 # будується і на кроці вниз не падає більш ніж на drop відносно попереднього кроку.
 mo_stable_floor <- function(scan, drop, start) {
   s <- scan[order(-scan$angle), ]
@@ -343,7 +340,7 @@ mo_stable_floor <- function(scan, drop, start) {
 mo_scan_angles <- function(d, cfg, eval_seasons = NULL) {
   grid <- mo_angle_grid(cfg); truth <- cfg$angle$truth_angle
   S <- names(d)
-  tms <- lapply(S, function(s) mo_season_timing(d[[s]], s, cfg)); names(tms) <- S
+  tms <- lapply(S, function(s) mo_season_timing(d[[s]], cfg)); names(tms) <- S
   rows <- lapply(grid, function(p) {
     tv <- mo_thr_vec(mo_thr_model(d, p))
     gv <- mo_good_vec(d, p, cfg$angle$min_seasons_goodness)
@@ -352,14 +349,14 @@ mo_scan_angles <- function(d, cfg, eval_seasons = NULL) {
                miss_pct = if (is.null(ev)) NA else 100 * mean(ev$miss), loss = mo_loss(ev, cfg),
                noepi = if (is.null(ev)) "" else paste(ev$season[ev$noepi == 1], collapse = ", "),
                ctl_tp = if (is.null(ev)) NA else sum(ev$tp), ctl_fp = if (is.null(ev)) NA else sum(ev$fa),
-               ctl_fn = if (is.null(ev)) NA else sum(ev$fn), ctl_tn = if (is.null(ev)) NA else sum(ev$tn), mcc_ctl = mo_ev_mcc(ev))
+               ctl_fn = if (is.null(ev)) NA else sum(ev$fn), ctl_tn = if (is.null(ev)) NA else sum(ev$tn), mcc_ctl = mo_ev_mcc(ev), n_ctl = if (is.null(ev)) 0 else nrow(ev))
   })
   scan <- do.call(rbind, rows)
   scan$balance <- pmin(scan$sens, scan$spec)
   scan
 }
 
-# Крок 2: вибір кута зі скану за правилами (межа стабільності, MCC більше 0, базовий рівень нижчий за середній, мінімум сумарної помилки)
+# Крок 2: вибір кута зі скану за правилами (межа стабільності, MCC більше 0, епідемічний поріг нижчий за середній, мінімум сумарної помилки)
 mo_select_angle <- function(scan, cfg, drop = NULL) {
   if (is.null(drop)) drop <- cfg$angle$stability_drop
   floor_a <- mo_stable_floor(scan, drop, cfg$angle$default)
@@ -394,29 +391,16 @@ mo_choose_angle <- function(d, cfg, eval_seasons = NULL) mo_select_angle(mo_scan
 # був би MCC основи з guard_weeks додатковими помилковими тижнями (типово один тиждень за всі контрольні сезони разом).
 # Обирається найменша сумарна помилка; при рівності вищий MCC; при рівності і MCC набір з recommended_min (5) і більше
 # сезонів, бо автори MEM радять 5-10 сезонів; далі коротший набір.
-# Кут, яким визначаються межі епідемії ("істина") для території. "auto": кут з найвищим MCC перехресної перевірки mem
-# (memgoodness) на всіх доступних сезонах території, тобто спосіб авторів MEM. Визначається один раз на всіх сезонах,
-# щоб усі набори сезонів і всі кути порогу перевірялись проти тих самих меж епідемії.
-mo_truth_angle <- function(d, cfg) {
-  ta <- cfg$angle$truth_angle
-  if (!identical(ta, "auto")) return(as.numeric(ta))
-  grid <- mo_angle_grid(cfg)
-  m <- vapply(grid, function(a) unname(mo_good_vec(d, a, cfg$angle$min_seasons_goodness)["mcc"]), numeric(1))
-  if (all(is.na(m))) return(cfg$angle$default)
-  best <- max(m, na.rm = TRUE)
-  cand <- grid[!is.na(m) & m >= best - 1e-9]
-  cand[which.min(abs(cand - cfg$angle$default))]
-}
-
 mo_select_seasons <- function(d, cfg) {
-  cfg$angle$truth_angle <- mo_truth_angle(d, cfg)
+  cfg$angle$truth_angle <- as.numeric(cfg$angle$truth_angle)
   cfg$.noepi_cur <- mo_noepi_seasons(d, cfg)
   ss <- cfg$season_selection; S <- names(d); N <- length(S)
   era <- S[S >= ss$era_start]; nE <- length(era)
   V <- setdiff(era, ss$not_validation)
   one <- function(set, note) list(seasons = set, eval_seasons = if (length(V)) V else NULL, note = note, truth_angle = cfg$angle$truth_angle, noepi = cfg$.noepi_cur,
     table = data.frame(n_available = N, n_seasons = length(set), seasons_used = paste(set, collapse = ", "), eval_seasons = paste(V, collapse = ", "),
-                       angle = NA, base = NA, medium = NA, mcc = NA, fa = NA, delay = NA, loss = NA, allowed = NA, chosen = TRUE, note = note))
+                       angle = NA, base = NA, medium = NA, mcc_ctl = NA, fa_ctl_sum = NA, delay_ctl_sum = NA, loss_ctl_sum = NA,
+                       ctl_tp = NA, ctl_fp = NA, ctl_fn = NA, ctl_tn = NA, noepi = NA, allowed = NA, mcc_floor = NA, chosen = TRUE, note = note))
   if (!isTRUE(ss$enabled)) return(one(S, "добір сезонів вимкнено, взято всі"))
   # поки сезонів нинішнього періоду менше era_full, основа це всі вони; коли їх era_full і більше, щороку порівнюються
   # набори з recommended_min (5) до N (не більше 10) найновіших сезонів
@@ -426,18 +410,18 @@ mo_select_seasons <- function(d, cfg) {
     sub <- tail(S, k); ch <- mo_choose_angle(d[, sub, drop = FALSE], cfg, eval_seasons = V)
     sc <- ch$scan[ch$scan$chosen, ][1, ]
     data.frame(n_available = N, n_seasons = k, seasons_used = paste(sub, collapse = ", "), eval_seasons = paste(V, collapse = ", "), angle = ch$angle,
-               base = sc$base, medium = sc$medium, mcc = sc$mcc_ctl, fa = sc$fa * length(V), delay = sc$delay * length(V), loss = sc$loss * length(V),
+               base = sc$base, medium = sc$medium, mcc_ctl = sc$mcc_ctl, fa_ctl_sum = sc$fa * sc$n_ctl, delay_ctl_sum = sc$delay * sc$n_ctl, loss_ctl_sum = sc$loss * sc$n_ctl,
                ctl_tp = sc$ctl_tp, ctl_fp = sc$ctl_fp, ctl_fn = sc$ctl_fn, ctl_tn = sc$ctl_tn, noepi = sc$noepi,
                allowed = !grepl("немає допустимого", ch$note), stringsAsFactors = FALSE)
   })
   tab <- do.call(rbind, rows)
   m0 <- with(tab[1, ], mo_mcc_floor(ctl_tp, ctl_fp, ctl_fn, ctl_tn, ss$guard_weeks))
   tab$mcc_floor <- m0
-  guard <- if (is.na(m0)) rep(TRUE, nrow(tab)) else (!is.na(tab$mcc) & tab$mcc >= m0 - 1e-9)
+  guard <- if (is.na(m0)) rep(TRUE, nrow(tab)) else (!is.na(tab$mcc_ctl) & tab$mcc_ctl >= m0 - 1e-9)
   guard[1] <- TRUE
-  cand <- tab$allowed & !is.na(tab$loss) & guard
+  cand <- tab$allowed & !is.na(tab$loss_ctl_sum) & guard
   if (!any(cand)) { pick <- kmin; note <- "жоден набір не дав допустимого кута, взято основу" } else {
-    o <- order(tab$loss, -round(ifelse(is.na(tab$mcc), -Inf, tab$mcc), 6), tab$n_seasons < ss$recommended_min, tab$n_seasons)
+    o <- order(tab$loss_ctl_sum, -round(ifelse(is.na(tab$mcc_ctl), -Inf, tab$mcc_ctl), 6), tab$n_seasons < ss$recommended_min, tab$n_seasons)
     pick <- tab$n_seasons[o[cand[o]][1]]
     note <- paste0("найменша сумарна помилка на контрольних сезонах; при рівності вищий MCC; при рівності і MCC набір з ", ss$recommended_min, " і більше сезонів (рекомендація авторів MEM), далі коротший")
   }
@@ -446,7 +430,7 @@ mo_select_seasons <- function(d, cfg) {
   list(seasons = tail(S, pick), eval_seasons = V, note = note, table = tab, truth_angle = cfg$angle$truth_angle, noepi = cfg$.noepi_cur)
 }
 
-# Кут власного порогу малої території: найвищий кут не вище стелі (кута групи), при якому епідемічний поріг
+# Кут власного порогу малої території: найвищий кут не вище кута групи, при якому епідемічний поріг
 # нижчий за середній. Вищий кут скорочує епідемічний період, і найвищі доепідемічні значення піднімають епідемічний поріг
 # над середнім; тоді власний поріг не має сенсу. NA, якщо такого кута немає.
 mo_pick_angle_below <- function(d, ceiling_angle, cfg) {
@@ -558,7 +542,7 @@ mo_hrom_prep <- function(h, ser, cfg, terr) {
 mo_p_truth <- function(p, cfg) {
   a <- cfg$.truth[[p$refid]]
   if (is.null(a)) a <- cfg$angle$truth_angle
-  if (identical(a, "auto")) cfg$angle$default else as.numeric(a)
+  as.numeric(a)
 }
 
 # Крок 1: результати власного порогу для кожного кута (для вибору кута за групою)
@@ -594,12 +578,14 @@ mo_hrom_thresholds <- function(j, cfg) {
     list(own = own, ref = rt, k = k, k_high = kh, refk = rt * k, refk_high = rt * kh, qmap = mo_qmap(rt, rv, hv), cases = cases)
   }
   full <- build(S, NULL)
+  # сезони без епідемії громади (за її власним рядом): у них рахуються лише хибні сигнали
+  ne <- mo_noepi_seasons(d, cfg)
   hold <- list()
   for (hs in S) {
     y <- d[[hs]]
     tm <- if (sum(!is.na(y)) >= 10) mo_timing(y, truth) else NULL
-    if (is.null(tm) || any(is.na(tm))) next
-    hold[[length(hold) + 1]] <- list(held = hs, tm = tm, th = build(setdiff(S, hs), hs))
+    if (!(hs %in% ne) && (is.null(tm) || any(is.na(tm)))) next
+    hold[[length(hold) + 1]] <- list(held = hs, tm = tm, noepi = hs %in% ne, th = build(setdiff(S, hs), hs))
   }
   list(p = p, full = full, hold = hold)
 }
@@ -686,9 +672,11 @@ mo_small_areas <- function(cfg, terr, ser, tabs, log) {
     wtab[[i]] <- data.frame(id = h$id, name = h$name, tier = tier[i], cases_week = p$med_cases, w_own = w, row.names = NULL)
     d <- p$d; S <- names(d); refd <- p$refd
     r_s <- c(); fa <- c(); dl <- c(); ms <- c()
+    ne <- mo_noepi_seasons(d, cfg)
     for (s in S) {
       y <- d[, s]; z <- refd[rownames(d), s]; ok <- !is.na(y) & !is.na(z)
       r_s <- c(r_s, if (sum(ok) >= 8) cor(y[ok], z[ok]) else NA)
+      if (s %in% ne) { fa <- c(fa, sum(!is.na(y) & y > th$own[1])); dl <- c(dl, NA); ms <- c(ms, 0); next }
       tm <- if (sum(!is.na(y)) >= 10) mo_timing(y, mo_p_truth(p, cfg)) else NULL
       if (is.null(tm) || any(is.na(tm))) { fa <- c(fa, NA); dl <- c(dl, NA); ms <- c(ms, NA); next }
       e <- mo_eval(y, th$own[1], tm[1], tm[2]); fa <- c(fa, e["fa"]); dl <- c(dl, e["delay"]); ms <- c(ms, e["miss"])
@@ -701,7 +689,7 @@ mo_small_areas <- function(cfg, terr, ser, tabs, log) {
       ms_ <- mo_methods(x$th, tier[i], wh)
       y <- p$d[[x$held]]
       for (m in names(ms_)) {
-        res_ <- mo_season_result(y, unname(ms_[[m]][1]), x$tm)
+        res_ <- mo_season_result(y, unname(ms_[[m]][1]), x$tm, isTRUE(x$noepi))
         hold[[length(hold) + 1]] <- data.frame(id = h$id, tier = tier[i], held = x$held, method = m, as.list(res_), row.names = NULL)
       }
     }
@@ -839,8 +827,9 @@ mo_changes <- function(thr_new, out_dir, cfg) {
              by = "id", all.x = TRUE, suffixes = c("", "_prev"))
   m$pct_base <- (m$base / m$base_prev - 1) * 100
   m$pct_medium <- (m$medium / m$medium_prev - 1) * 100
-  # Щороку до набору додається один сезон, тому звичайна зміна порогу не більша за найбільший вплив одного сезону
-  # (на скільки змінюється поріг, якщо прибрати з набору один сезон). Межа береться з попереднього запуску, якщо вона там є.
+  # Звичайна щорічна зміна порогу (додано новий сезон, набір сезонів обрано заново) порівнянна з найбільшим впливом
+  # одного сезону (на скільки змінюється поріг, якщо прибрати з набору один сезон). Більша зміна позначається для перевірки
+  # даних. Межа береться з попереднього запуску, якщо вона там є.
   m$flag_limit <- ifelse(is.na(m$infl_max_pct_prev), m$infl_max_pct, m$infl_max_pct_prev)
   big <- !is.na(m$flag_limit) & abs(m$pct_base) > m$flag_limit
   m$note <- ifelse(is.na(m$base_prev), "нова територія",
@@ -864,7 +853,7 @@ mo_run <- function(cfg_path) {
   if (length(auto)) cat("  Увага: сезони", paste0(auto, " (", MO_AUTO_EXCLUDE[auto], ")", collapse = ", "), "відсічено автоматично, вони не придатні для порогів\n")
   checks <- mo_check_inputs(cfg, terr)
   nflag <- sum(nzchar(checks$note) & !grepl("^сезон відсікається автоматично$", checks$note))
-  if (nflag) cat("  Перевірка даних: позначено", nflag, "пар територія і сезон, див. аркуш «", MO_SHEETS$input_check, "»\n")
+  if (nflag) cat("  Перевірка даних: позначено", nflag, "пар територія і сезон, див. аркуш", paste0("«", MO_SHEETS$input_check, "»\n"))
   cfg$.season_sets <- NULL
   ser <- list()
   for (i in seq_len(nrow(terr))) ser[[terr$id[i]]] <- mo_series(terr[i, ], cfg, log, all_seasons = TRUE)
@@ -934,12 +923,12 @@ mo_run <- function(cfg_path) {
   # паспорт порогу основної території: контрольні сезони, якість, помилка і як обрано набір
   pk <- season_pick[season_pick$chosen, ]
   thr_all$eval_seasons <- pk$eval_seasons[match(thr_all$id, pk$id)]
-  thr_all$mcc <- round(pk$mcc[match(thr_all$id, pk$id)], 3)
+  thr_all$mcc_ctl <- round(pk$mcc_ctl[match(thr_all$id, pk$id)], 3)
   # найбільший вплив одного сезону на епідемічний поріг, %: для основної території з її набору, для малої з її еталона
   imax <- tapply(abs(infl$pct_base), infl$id, max, na.rm = TRUE)
   rid <- ifelse(thr_all$kind == "основна", thr_all$id, terr$reference_id[match(thr_all$id, terr$id)])
   thr_all$infl_max_pct <- round(as.numeric(imax[rid]), 1)
-  thr_all$loss <- pk$loss[match(thr_all$id, pk$id)]
+  thr_all$loss_ctl_sum <- pk$loss_ctl_sum[match(thr_all$id, pk$id)]
   thr_all$note <- pk$note[match(thr_all$id, pk$id)]
   thr_all$noepi <- vapply(thr_all$id, function(id) if (!is.null(sel[[id]])) paste(sel[[id]]$noepi, collapse = ", ") else NA_character_, character(1))
   thr_all$truth_angle <- vapply(thr_all$id, function(id) if (!is.null(sel[[id]])) as.numeric(sel[[id]]$truth_angle) else NA_real_, numeric(1))
@@ -989,7 +978,7 @@ mo_run <- function(cfg_path) {
   if (!is.null(mw)) add(S$waves, mw)
   if (!is.null(dim)) add(S$dim, dim)
   cfgdf <- data.frame(параметр = c("область, сезон", "виключені сезони", "кут: мін, макс, крок (діапазон Vega 2013: 2-4)", "критерій кута", "ваги: хибний сигнал, тиждень запізнення",
-                                   "кут для визначення справжнього початку епідемії", "максимальна межа падіння епідемічного порогу на кроці вниз", "кут для малих територій за групами",
+                                   "кут для меж епідемії в контрольних сезонах (memtiming)", "максимальна межа падіння епідемічного порогу на кроці вниз", "кут для малих територій за групами",
                                    "кут власного порогу громади",
                                    "спосіб для малих територій", "очищення початку сезону", "групи за медіаною випадків (надійні від, обмежені від)",
                                    "максимум сезонів у розрахунку", "добір сезонів основних територій", "випуск"),
@@ -1007,10 +996,9 @@ mo_run <- function(cfg_path) {
                  paste(cfg$small_areas$groups$reliable_min, cfg$small_areas$groups$limited_min, sep = ", "), cfg$season$max_seasons,
                  with(cfg$season_selection, if (isTRUE(enabled)) paste0("увімкнено: основа всі сезони від ", era_start, ", поки їх менше ", era_full,
                    " додаються старші підряд від найновішого (не більше ", cfg$season$max_seasons, " разом, мінімум ", min_seasons, "); контрольні сезони від ", era_start,
-                   " крім ", paste(not_validation, collapse = ", "), "; найменша сумарна помилка, при рівності вищий MCC на контрольних сезонах, далі набір з ", recommended_min, " і більше сезонів; набір відкидається, якщо його MCC нижчий, ніж в основи з ", guard_weeks, " додатковим помилковим тижнем",
-                   if (length(cfg$epidemic_periods)) paste0("; межі епідемії за рішенням користувача: ", paste0(names(cfg$epidemic_periods), " тижні ", vapply(cfg$epidemic_periods, function(p) paste(p, collapse = "-"), ""), collapse = "; ")) else "")
+                   " крім ", paste(not_validation, collapse = ", "), "; найменша сумарна помилка, при рівності вищий MCC на контрольних сезонах, далі набір з ", recommended_min, " і більше сезонів; набір відкидається, якщо його MCC нижчий, ніж в основи з ", guard_weeks, " додатковим помилковим тижнем; коли сезонів від ", era_start, " стане ", era_full, " і більше, порівнюються набори від ", recommended_min, " до ", cfg$season$max_seasons, " найновіших сезонів; сезон, пік якого нижчий за епідемічний поріг (кут ", cfg$angle$truth_angle, ", інші сезони території), вважається сезоном без епідемії: у ньому рахуються лише хибні сигнали")
                    else "вимкнено: усі сезони після виключень"),
-                 paste0("memopt 0.3, ", format(Sys.time(), "%Y-%m-%d %H:%M"))))
+                 paste0("memopt 0.4, ", format(Sys.time(), "%Y-%m-%d %H:%M"))))
   add(S$config, cfgdf, widths = c(55, 120))
   f <- file.path(out_dir, cfg$paths$workbook_name)
   saveWorkbook(wb, f, overwrite = TRUE)

@@ -98,8 +98,8 @@ intro = [
     "4. Блок «Показується (з підтвердженням районом)»: для громад з позначкою «так» у колонці AN рівень «середній» і вище показується лише в тижні,",
     "   коли район-еталон (колонка AO) не нижче свого епідемічного порогу; інакше показується «низький*» (зірочка означає місцеве підвищення).",
     "   Для решти територій показується рівень за власними порогами без змін.",
-    "5. Рядки «… ОТГ без м. …» окремого порогу не мають (пороги розраховано для громади разом із містом), тому рівень для них не виводиться.",
-    "6. Усі пороги на аркуші «Пороги»; джерело: memopt, розрахунок 22.10.2026.",
+    "5. Рядки на зразок «Конотопська ОТГ без м. Конотоп» окремого порогу не мають (пороги розраховано для громади разом із містом), тому рівень для них не виводиться.",
+    "6. Усі пороги на аркуші «Пороги»; джерело: memopt, розрахунок " + __import__("datetime").date.fromtimestamp(os.path.getmtime(os.path.join(HERE, "output", "memopt_thresholds.csv"))).strftime("%d.%m.%Y") + ".",
     "7. Щоб мати це всередині книги DW: правою кнопкою на вкладці аркуша району, «Копіювати до», оберіть книгу DW; формули IMPORTRANGE працюватимуть і там.",
 ]
 if not SLIM:
@@ -125,7 +125,7 @@ for dist, cfg in DW.items():
     ws = wb.create_sheet(dist)
     n = len(cfg["rows"])
     url = f"https://docs.google.com/spreadsheets/d/{cfg['id']}/"
-    ws.cell(row=1, column=1, value=f"{dist} район: показники з книги «Тренди ГРВІ … DW», пороги на сезон 2026/2027 і підтвердження районом").font = Font(bold=True, size=12)
+    ws.cell(row=1, column=1, value=f"{dist} район: показники з книги «Тренди ГРВІ DW», пороги на сезон 2026/2027 і правило підтвердження районом").font = Font(bold=True, size=12)
     hdr = 2
     ws.cell(row=hdr, column=1, value="Територія").font = Font(bold=True)
     for j, w in enumerate(WEEKS, 2):
@@ -137,7 +137,7 @@ for dist, cfg in DW.items():
     col_ref = 2 + NW + 7   # AN
     for key, lab in zip(["base", "medium", "high", "veryhigh"], ["Епідемічний", "Середній", "Високий", "Дуже високий"]):
         ws.cell(row=hdr, column=thr_cols[key], value=lab).font = Font(bold=True)
-    ws.cell(row=hdr, column=col_flag, value="Підтвердження районом").font = Font(bold=True)
+    ws.cell(row=hdr, column=col_flag, value="Правило підтвердження районом").font = Font(bold=True)
     ws.cell(row=hdr, column=col_ref, value="Еталон").font = Font(bold=True)
 
     # Блок 1: показники

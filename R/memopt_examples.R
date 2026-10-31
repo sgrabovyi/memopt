@@ -17,7 +17,7 @@ A <- as.numeric(thr_csv$angle_txt[thr_csv$id == "UA59"][1])
 # 1. кут нахилу: крива MAP і кут на реальному сезоні
 angle_ex <- function(season, angles) {
   y <- d[[season]]
-  tm <- memtiming(data.frame(y), i.method = 2, i.param = 2.8)
+  tm <- memtiming(data.frame(y), i.method = 2, i.param = cfg$angle$truth_angle)
   mc <- tm$map.curve; sl <- tm$slope.curve
   list(season = season, weeks = rownames(d), values = round(y, 1),
        map = data.frame(duration = mc[-1, 1], share = round(mc[-1, 2], 1), slope = round(sl[seq_len(nrow(mc) - 1), 2], 2)),
@@ -46,7 +46,7 @@ y <- d[[hid]]
 per_truth <- function(a) { t <- mo_timing(y, a); c(start = unname(t[1]), end = unname(t[2])) }
 tr <- do.call(rbind, lapply(c(2.25, 2.5, 2.8, 3.25, 3.5), function(a) { p <- per_truth(a); r <- mo_season_result(y, T, p)
   data.frame(truth_angle = a, start = p[["start"]], end = p[["end"]], start_week = lab(p[["start"]], d), end_week = lab(p[["end"]], d), fa = unname(r["fa"]), delay = unname(r["delay"]), miss = unname(r["miss"])) }))
-p28 <- per_truth(2.8)
+p28 <- per_truth(cfg$angle$truth_angle)
 period <- ifelse(seq_along(y) < p28[["start"]], "доепідемічний", ifelse(seq_along(y) <= p28[["end"]], "епідемічний", "післяепідемічний"))
 ex$hidden <- list(season = hid, angle = A, threshold = T, weeks = rownames(d), values = round(y, 1), period = period, above = !is.na(y) & y > T, truth = tr)
 ok <- !is.na(y)
@@ -75,26 +75,27 @@ ex$k <- list(territory = h2$name, reference = terr$name[terr$id == h2$reference_
                                                           weeks = sum(!is.na(d2[[s]])))),
              k_all = mo_k(unlist(d2), unlist(r2[rownames(d2), names(d2), drop = FALSE]), "all"))
 
-# 6. приклад із хибними сигналами: перебір основних територій
+# 6. приклад із хибними сигналами: основні території з їхніми власними наборами сезонів і кутами, лише контрольні сезони
+ctl <- setdiff(names(d)[names(d) >= cfg$season_selection$era_start], cfg$season_selection$not_validation)
 cand <- list()
 for (i in which(terr$kind == "main")) {
   di <- mo_series(terr[i, ], cfg)
-  if (NCOL(di) < 5) next
-  for (hs in names(di)) {
+  Ai <- suppressWarnings(as.numeric(thr_csv$angle_txt[thr_csv$id == terr$id[i]][1])); if (is.na(Ai)) next
+  for (hs in intersect(ctl, names(di))) {
     yy <- di[[hs]]; if (sum(!is.na(yy)) < 10) next
-    Tt <- unname(mo_thr_vec(mo_thr_model(di[, setdiff(names(di), hs), drop = FALSE], A))["base"])
-    tt <- mo_timing(yy, 2.8); if (is.null(tt) || is.na(Tt)) next
+    Tt <- unname(mo_thr_vec(mo_thr_model(di[, setdiff(names(di), hs), drop = FALSE], Ai))["base"])
+    tt <- mo_timing(yy, cfg$angle$truth_angle); if (is.null(tt) || is.na(Tt)) next
     r <- mo_season_result(yy, Tt, tt)
-    cand[[length(cand) + 1]] <- data.frame(name = terr$name[i], season = hs, T = Tt, n_train = NCOL(di) - 1, fa = unname(r["fa"]), delay = unname(r["delay"]), start = tt[[1]], end = tt[[2]])
+    cand[[length(cand) + 1]] <- data.frame(name = terr$name[i], season = hs, angle = Ai, T = Tt, n_train = NCOL(di) - 1, fa = unname(r["fa"]), delay = unname(r["delay"]), start = tt[[1]], end = tt[[2]])
   }
 }
-cand <- do.call(rbind, cand); cand <- cand[cand$fa >= 2 & cand$delay >= 1 & cand$delay <= 4, ]
-cand <- cand[order(-cand$fa), ]
+cand <- do.call(rbind, cand); cand <- cand[cand$fa >= 2 & cand$delay <= 4, ]
+cand <- cand[order(-cand$fa, cand$delay), ]
 ex$fa_candidates <- head(cand, 6)
 
-fx <- if (any(cand$name == "м. Охтирка")) cand[cand$name == "м. Охтирка", ][1, ] else cand[1, ]
-dx <- mo_series(terr[terr$name == fx$name, ], cfg); yx <- dx[[fx$season]]; tx <- mo_timing(yx, 2.8)
-ex$fa_example <- list(name = fx$name, season = fx$season, threshold = fx$T, n_train = fx$n_train, fa = fx$fa, delay = fx$delay, weeks = rownames(dx), values = round(yx, 1),
+fx <- cand[1, ]
+dx <- mo_series(terr[terr$name == fx$name, ], cfg); yx <- dx[[fx$season]]; tx <- mo_timing(yx, cfg$angle$truth_angle)
+ex$fa_example <- list(name = fx$name, season = fx$season, angle = fx$angle, threshold = fx$T, n_train = fx$n_train, fa = fx$fa, delay = fx$delay, weeks = rownames(dx), values = round(yx, 1),
                       start = tx[[1]], end = tx[[2]], start_week = rownames(dx)[tx[[1]]], end_week = rownames(dx)[tx[[2]]])
 dir.create("output", showWarnings = FALSE)
 writeLines(jsonlite::toJSON(ex, auto_unbox = TRUE, pretty = TRUE, digits = 6, na = "null"), "output/examples.json", useBytes = TRUE)
