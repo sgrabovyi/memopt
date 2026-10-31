@@ -135,7 +135,7 @@ mo_read_raw <- function(row, cfg) {
   rn <- x[[1]]
   x <- x[, -1, drop = FALSE]
   rownames(x) <- rn
-  x <- x[, !(names(x) %in% cfg$placeholder_seasons), drop = FALSE]
+  x <- x[, !(names(x) %in% c(cfg$placeholder_seasons, mo_unfinished(names(x), cfg))), drop = FALSE]
   x <- x[match(weeks, rn), , drop = FALSE]
   rownames(x) <- weeks
   x
@@ -157,6 +157,19 @@ mo_censor_start <- function(y, k, look) {
     } else break
   }
   list(y = y, idx = weeks_cens)
+}
+
+# Сезони, які ще тривають за календарем: сезон "РРРР/РРРР+1" завершується в неділю тижня end_week (ISO) року РРРР+1.
+# Незавершений сезон у пороги не береться, навіть якщо в рядах уже є його перші тижні (дата відліку cfg$season$as_of, інакше сьогодні).
+mo_unfinished <- function(seasons, cfg) {
+  today <- as.Date(mo_def(cfg$season$as_of, as.character(Sys.Date())))
+  y2 <- ifelse(grepl("^[0-9]{4}/[0-9]{4}$", seasons), suppressWarnings(as.integer(substr(seasons, 6, 9))), NA_integer_)
+  end <- vapply(y2, function(y) {
+    if (is.na(y)) return(NA_real_)
+    j4 <- as.Date(sprintf("%d-01-04", y)); mon1 <- j4 - (as.integer(format(j4, "%u")) - 1)
+    as.numeric(mon1 + cfg$season$end_week * 7 - 1)
+  }, numeric(1))
+  seasons[!is.na(end) & as.numeric(today) <= end]
 }
 
 # Сезони, які програма відсікає завжди (користувач не може їх повернути, лише додатково виключити інші)
@@ -779,6 +792,7 @@ mo_start_cluster <- function(cfg) {
   nw <- cfg$parallel$workers
   if (nw > 1 && is.null(get0("MO_CL", envir = .GlobalEnv, ifnotfound = NULL))) {
     core <- get0("MO_CORE", envir = .GlobalEnv)
+    if (is.null(core)) stop("Для паралельного розрахунку потрібна змінна MO_CORE зі шляхом до memopt_core.R (її задає run_optimizer.R і застосунок)")
     cl <- parallel::makeCluster(nw)
     parallel::clusterExport(cl, "core", envir = environment())
     invisible(parallel::clusterEvalQ(cl, source(core, encoding = "UTF-8")))
@@ -849,6 +863,10 @@ mo_run <- function(cfg_path) {
   log <- new.env(); log$rows <- list()
   cat("1. Читання і підготовка рядів\n")
   found <- unique(unlist(lapply(seq_len(nrow(terr)), function(i) names(mo_read_raw(terr[i, ], cfg)))))
+  raw_names <- unique(unlist(lapply(seq_len(nrow(terr)), function(i) { f <- cfg$.find(terr$file[i]); names(read_excel(f, sheet = terr$sheet[i], n_max = 0))[-1] })))
+  unf <- mo_unfinished(raw_names, cfg)
+  if (length(unf)) cat("  Сезон", paste(unf, collapse = ", "), "ще триває, у розрахунок не береться
+")
   auto <- intersect(names(MO_AUTO_EXCLUDE), found)
   if (length(auto)) cat("  Увага: сезони", paste0(auto, " (", MO_AUTO_EXCLUDE[auto], ")", collapse = ", "), "відсічено автоматично, вони не придатні для порогів\n")
   checks <- mo_check_inputs(cfg, terr)

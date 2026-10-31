@@ -5,3 +5,4 @@ __pycache__/
 .RData
 output_*.log
 output_test_*/
+projects/
