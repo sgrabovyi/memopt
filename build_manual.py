@@ -585,6 +585,9 @@ def fill(template, wb_path):
                                  ["Кут нахилу", "2024/2025: тижнів", "2024/2025: тижні", "2024/2025: % випадків", "2025/2026: тижнів", "2025/2026: тижні"])
     # --- пороги
     t = ex["thr"]
+    reps["EX_ANGLE"] = fmn(t["angle"], 2).rstrip("0").rstrip(",") if "," in fmn(t["angle"], 2) else fmn(t["angle"], 2)
+    tr28 = [r for r in ex["hidden"]["truth"] if abs(r["truth_angle"] - 2.8) < 1e-9][0]
+    reps.update({"HID_EPI_FROM": str(tr28["start_week"]), "HID_EPI_TO": str(tr28["end_week"]), "HID_EPI_LEN": str(int(tr28["end"] - tr28["start"] + 1))})
     reps.update({"THR_PRE_N": str(t["pre_n"]), "THR_PRE_MEAN": fmn(t["pre_mean"], 1), "THR_PRE_SD": fmn(t["pre_sd"], 1), "THR_BASE": fmn(t["base"], 0),
                  "THR_EPI_N": str(t["epi_n"]), "THR_EPI_GM": fmn(t["epi_geomean"], 0), "THR_MEDIUM": fmn(t["medium"], 0), "THR_HIGH": fmn(t["high"], 0),
                  "THR_VERYHIGH": fmn(t["veryhigh"], 0), "THR_BELOW_1": str(t["epi_below"][0]), "THR_BELOW_2": str(t["epi_below"][1]), "THR_BELOW_3": str(t["epi_below"][2]),

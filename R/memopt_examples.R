@@ -10,6 +10,9 @@ ex <- list()
 lab <- function(i, d) rownames(d)[i]
 d <- mo_series(terr[terr$name == "Сумська область", ], cfg)
 ex$territory <- "Сумська область"; ex$seasons <- names(d); ex$n_seasons <- NCOL(d)
+# кут, обраний для області в останньому розрахунку (з набором сезонів, яким він справді рахувався)
+thr_csv <- read.csv(file.path(cfg$.path(cfg$paths$output_dir), "memopt_thresholds.csv"), stringsAsFactors = FALSE, encoding = "UTF-8")
+A <- as.numeric(thr_csv$angle_txt[thr_csv$id == "UA59"][1])
 
 # 1. кут нахилу: крива MAP і кут на реальному сезоні
 angle_ex <- function(season, angles) {
@@ -27,9 +30,9 @@ ex$angle_a <- angle_ex("2024/2025", c(2.25, 2.5, 2.8, 3.25, 3.5))
 ex$angle_b <- angle_ex("2025/2026", c(2.25, 2.5, 2.8, 3.25, 3.5))
 
 # 2. пороги: як складаються з даних
-m <- mo_thr_model(d, 2.5)
+m <- mo_thr_model(d, A)
 pre <- unlist(m$pre.data.nona); epi <- unlist(m$epi.data.nona)
-ex$thr <- list(angle = 2.5, n_values_per_season = m$n.max, pre_n = length(pre), pre_mean = mean(pre), pre_sd = sd(pre), pre_sorted = round(sort(pre, decreasing = TRUE)),
+ex$thr <- list(angle = A, n_values_per_season = m$n.max, pre_n = length(pre), pre_mean = mean(pre), pre_sd = sd(pre), pre_sorted = round(sort(pre, decreasing = TRUE)),
                base = unname(m$pre.post.intervals[1, 3]),
                epi_n = length(epi), epi_geomean = exp(mean(log(epi))), epi_sdlog = sd(log(epi)), epi_sorted = round(sort(epi, decreasing = TRUE)),
                medium = unname(m$epi.intervals[1, 4]), high = unname(m$epi.intervals[2, 4]), veryhigh = unname(m$epi.intervals[3, 4]))
@@ -38,14 +41,14 @@ ex$thr$epi_below <- c(sum(epi < ex$thr$medium), sum(epi < ex$thr$high), sum(epi 
 # 3. відкладений сезон: поріг з решти сезонів проти сезону, якого він не бачив
 hid <- "2024/2025"
 dtr <- d[, setdiff(names(d), hid), drop = FALSE]
-T <- unname(mo_thr_vec(mo_thr_model(dtr, 2.5))["base"])
+T <- unname(mo_thr_vec(mo_thr_model(dtr, A))["base"])
 y <- d[[hid]]
 per_truth <- function(a) { t <- mo_timing(y, a); c(start = unname(t[1]), end = unname(t[2])) }
 tr <- do.call(rbind, lapply(c(2.25, 2.5, 2.8, 3.25, 3.5), function(a) { p <- per_truth(a); r <- mo_season_result(y, T, p)
   data.frame(truth_angle = a, start = p[["start"]], end = p[["end"]], start_week = lab(p[["start"]], d), end_week = lab(p[["end"]], d), fa = unname(r["fa"]), delay = unname(r["delay"]), miss = unname(r["miss"])) }))
 p28 <- per_truth(2.8)
 period <- ifelse(seq_along(y) < p28[["start"]], "доепідемічний", ifelse(seq_along(y) <= p28[["end"]], "епідемічний", "післяепідемічний"))
-ex$hidden <- list(season = hid, angle = 2.5, threshold = T, weeks = rownames(d), values = round(y, 1), period = period, above = !is.na(y) & y > T, truth = tr)
+ex$hidden <- list(season = hid, angle = A, threshold = T, weeks = rownames(d), values = round(y, 1), period = period, above = !is.na(y) & y > T, truth = tr)
 ok <- !is.na(y)
 ep <- period == "епідемічний"; ab <- !is.na(y) & y > T
 TP <- sum(ok & ep & ab); FN <- sum(ok & ep & !ab); FP <- sum(ok & !ep & ab); TN <- sum(ok & !ep & !ab)
@@ -79,7 +82,7 @@ for (i in which(terr$kind == "main")) {
   if (NCOL(di) < 5) next
   for (hs in names(di)) {
     yy <- di[[hs]]; if (sum(!is.na(yy)) < 10) next
-    Tt <- unname(mo_thr_vec(mo_thr_model(di[, setdiff(names(di), hs), drop = FALSE], 2.5))["base"])
+    Tt <- unname(mo_thr_vec(mo_thr_model(di[, setdiff(names(di), hs), drop = FALSE], A))["base"])
     tt <- mo_timing(yy, 2.8); if (is.null(tt) || is.na(Tt)) next
     r <- mo_season_result(yy, Tt, tt)
     cand[[length(cand) + 1]] <- data.frame(name = terr$name[i], season = hs, T = Tt, n_train = NCOL(di) - 1, fa = unname(r["fa"]), delay = unname(r["delay"]), start = tt[[1]], end = tt[[2]])

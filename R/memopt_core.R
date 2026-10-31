@@ -46,7 +46,7 @@ MO_LABELS <- c(id = "Код", name = "Назва", level = "Рівень", seaso
   n_seasons = "Сезонів у наборі", eval_seasons = "Контрольні сезони", mcc_floor = "Найнижчий дозволений MCC",
   ctl_tp = "Тижні епідемії над порогом", ctl_fp = "Тижні поза епідемією над порогом", ctl_fn = "Тижні епідемії під порогом", ctl_tn = "Тижні поза епідемією під порогом", note = "Примітка", n_available = "Сезонів доступно",
   seasons_used_prev = "Сезони попереднього запуску", base_prev = "Попередній епідемічний поріг", medium_prev = "Попередній середній поріг",
-  pct_medium = "Зміна середнього порогу, %", flag_limit = "Найбільший вплив одного сезону, %", mcc_ctl = "MCC на контрольних сезонах", truth_angle = "Кут для меж епідемії", infl_max_pct = "Найбільший вплив одного сезону, %", weeks_missing = "Пропущено тижнів усередині сезону", weeks_zero = "Нульових тижнів",
+  pct_medium = "Зміна середнього порогу, %", flag_limit = "Найбільший вплив одного сезону, %", mcc_ctl = "MCC на контрольних сезонах", truth_angle = "Кут для меж епідемії", noepi = "Контрольні сезони без епідемії", infl_max_pct = "Найбільший вплив одного сезону, %", weeks_missing = "Пропущено тижнів усередині сезону", weeks_zero = "Нульових тижнів",
   peak_ratio = "Пік до звичного піку")
 
 # ---------------------------------------------------------------- налаштування
@@ -262,16 +262,40 @@ mo_season_result <- function(y, T, tm) {
 
 # Перевірка "поріг з решти сезонів на відкладеному сезоні" для заданого кута побудови порогу.
 # eval_d (необов'язково): ряди для оцінки схованого сезону (наприклад, без очищення початку).
-mo_loso_eval <- function(d, angle, truth, tms = NULL, eval_d = NULL, eval_seasons = NULL) {
+# Сезони без епідемії для території: пік сезону не досягає епідемічного порогу (визначення MEM: нижче епідемічного
+# порогу епідемії немає; між епідемічним і середнім порогом це епідемія низької інтенсивності). Поріг будується один раз
+# стандартним кутом за всіма іншими доступними сезонами території, тому рішення не залежить від кута і набору сезонів,
+# які перевіряються (інакше високий поріг сам оголошував би сезони неепідемічними і здавався б кращим).
+mo_noepi_seasons <- function(d, cfg, seasons = names(d)) {
+  a <- cfg$angle$truth_angle; if (identical(a, "auto")) a <- cfg$angle$default
+  S <- names(d); out <- character(0)
+  for (s in intersect(seasons, S)) {
+    y <- d[[s]]; if (sum(!is.na(y)) < 10 || length(S) < 3) next
+    T <- unname(mo_thr_vec(mo_thr_model(d[, setdiff(S, s), drop = FALSE], as.numeric(a)))["base"])
+    if (!is.na(T) && max(y, na.rm = TRUE) < T) out <- c(out, s)
+  }
+  out
+}
+
+mo_loso_eval <- function(d, angle, truth, tms = NULL, eval_d = NULL, eval_seasons = NULL, noepi = character(0)) {
   S <- names(d); out <- list()
   ed <- if (is.null(eval_d)) d else eval_d
   for (s in if (is.null(eval_seasons)) S else S[S %in% eval_seasons]) {
+    tv <- mo_thr_vec(mo_thr_model(d[, setdiff(S, s), drop = FALSE], angle))
+    T <- unname(tv["base"]); y <- ed[[s]]
+    # Сезон без епідемії (mo_noepi_seasons): MEM і в такому сезоні знаходить "епідемічний період", тому запізнення
+    # не рахується: увесь сезон неепідемічний, помилками є лише тижні над епідемічним порогом (хибні сигнали).
+    if (s %in% noepi && !is.na(T)) {
+      ok <- !is.na(y)
+      out[[length(out) + 1]] <- data.frame(season = s, failed = 0, fa = sum(ok & y > T), delay = 0, miss = 0, len = 0,
+                                           tp = 0, fn = 0, tn = sum(ok & y <= T), noepi = 1)
+      next
+    }
     tm <- if (!is.null(tms)) tms[[s]] else {
-      y0 <- ed[[s]]; if (sum(!is.na(y0)) >= 10) mo_timing(y0, truth) else NULL
+      if (sum(!is.na(y)) >= 10) mo_timing(y, truth) else NULL
     }
     if (is.null(tm) || any(is.na(tm))) next
-    T <- unname(mo_thr_vec(mo_thr_model(d[, setdiff(S, s), drop = FALSE], angle))["base"])
-    out[[length(out) + 1]] <- data.frame(season = s, as.list(mo_season_result(ed[[s]], T, tm)))
+    out[[length(out) + 1]] <- data.frame(season = s, as.list(mo_season_result(y, T, tm)), noepi = 0)
   }
   if (length(out)) do.call(rbind, out) else NULL
 }
@@ -323,9 +347,10 @@ mo_scan_angles <- function(d, cfg, eval_seasons = NULL) {
   rows <- lapply(grid, function(p) {
     tv <- mo_thr_vec(mo_thr_model(d, p))
     gv <- mo_good_vec(d, p, cfg$angle$min_seasons_goodness)
-    ev <- mo_loso_eval(d, p, truth, tms, eval_seasons = eval_seasons)
+    ev <- mo_loso_eval(d, p, truth, tms, eval_seasons = eval_seasons, noepi = cfg$.noepi_cur)
     data.frame(angle = p, as.list(tv), as.list(gv), fa = if (is.null(ev)) NA else mean(ev$fa), delay = if (is.null(ev)) NA else mean(ev$delay),
                miss_pct = if (is.null(ev)) NA else 100 * mean(ev$miss), loss = mo_loss(ev, cfg),
+               noepi = if (is.null(ev)) "" else paste(ev$season[ev$noepi == 1], collapse = ", "),
                ctl_tp = if (is.null(ev)) NA else sum(ev$tp), ctl_fp = if (is.null(ev)) NA else sum(ev$fa),
                ctl_fn = if (is.null(ev)) NA else sum(ev$fn), ctl_tn = if (is.null(ev)) NA else sum(ev$tn), mcc_ctl = mo_ev_mcc(ev))
   })
@@ -385,10 +410,11 @@ mo_truth_angle <- function(d, cfg) {
 
 mo_select_seasons <- function(d, cfg) {
   cfg$angle$truth_angle <- mo_truth_angle(d, cfg)
+  cfg$.noepi_cur <- mo_noepi_seasons(d, cfg)
   ss <- cfg$season_selection; S <- names(d); N <- length(S)
   era <- S[S >= ss$era_start]; nE <- length(era)
   V <- setdiff(era, ss$not_validation)
-  one <- function(set, note) list(seasons = set, eval_seasons = if (length(V)) V else NULL, note = note, truth_angle = cfg$angle$truth_angle,
+  one <- function(set, note) list(seasons = set, eval_seasons = if (length(V)) V else NULL, note = note, truth_angle = cfg$angle$truth_angle, noepi = cfg$.noepi_cur,
     table = data.frame(n_available = N, n_seasons = length(set), seasons_used = paste(set, collapse = ", "), eval_seasons = paste(V, collapse = ", "),
                        angle = NA, base = NA, medium = NA, mcc = NA, fa = NA, delay = NA, loss = NA, allowed = NA, chosen = TRUE, note = note))
   if (!isTRUE(ss$enabled)) return(one(S, "добір сезонів вимкнено, взято всі"))
@@ -401,7 +427,7 @@ mo_select_seasons <- function(d, cfg) {
     sc <- ch$scan[ch$scan$chosen, ][1, ]
     data.frame(n_available = N, n_seasons = k, seasons_used = paste(sub, collapse = ", "), eval_seasons = paste(V, collapse = ", "), angle = ch$angle,
                base = sc$base, medium = sc$medium, mcc = sc$mcc_ctl, fa = sc$fa * length(V), delay = sc$delay * length(V), loss = sc$loss * length(V),
-               ctl_tp = sc$ctl_tp, ctl_fp = sc$ctl_fp, ctl_fn = sc$ctl_fn, ctl_tn = sc$ctl_tn,
+               ctl_tp = sc$ctl_tp, ctl_fp = sc$ctl_fp, ctl_fn = sc$ctl_fn, ctl_tn = sc$ctl_tn, noepi = sc$noepi,
                allowed = !grepl("немає допустимого", ch$note), stringsAsFactors = FALSE)
   })
   tab <- do.call(rbind, rows)
@@ -417,7 +443,7 @@ mo_select_seasons <- function(d, cfg) {
   }
   tab$allowed <- tab$allowed & guard
   tab$chosen <- tab$n_seasons == pick; tab$note <- ifelse(tab$chosen, note, ifelse(guard, "", paste0("MCC нижчий, ніж в основи з ", ss$guard_weeks, " додатковим помилковим тижнем")))
-  list(seasons = tail(S, pick), eval_seasons = V, note = note, table = tab, truth_angle = cfg$angle$truth_angle)
+  list(seasons = tail(S, pick), eval_seasons = V, note = note, table = tab, truth_angle = cfg$angle$truth_angle, noepi = cfg$.noepi_cur)
 }
 
 # Кут власного порогу малої території: найвищий кут не вище стелі (кута групи), при якому епідемічний поріг
@@ -463,6 +489,7 @@ mo_stability <- function(d, angle, min_n = 5) {
 mo_territory <- function(item, cfg) {
   t <- item$row; d <- item$d
   if (!is.null(item$truth_angle)) cfg$angle$truth_angle <- item$truth_angle
+  cfg$.noepi_cur <- item$noepi
   ch <- mo_choose_angle(d, cfg, item$eval_seasons)
   tv <- mo_thr_vec(mo_thr_model(d, ch$angle)); gv <- mo_good_vec(d, ch$angle, cfg$angle$min_seasons_goodness)
   inf <- mo_influence(d, ch$angle)
@@ -538,8 +565,9 @@ mo_p_truth <- function(p, cfg) {
 mo_hrom_angle_scan <- function(p, cfg) {
   d <- p$d; S <- names(d); truth <- mo_p_truth(p, cfg)
   tms <- lapply(S, function(s) { y <- d[[s]]; if (sum(!is.na(y)) >= 10) mo_timing(y, truth) else NULL }); names(tms) <- S
+  noepi <- mo_noepi_seasons(d, cfg)
   do.call(rbind, lapply(mo_angle_grid(cfg), function(a) {
-    ev <- mo_loso_eval(d, a, truth, tms)
+    ev <- mo_loso_eval(d, a, truth, tms, noepi = noepi)
     if (is.null(ev)) return(NULL)
     data.frame(id = p$h$id, angle = a, ev, row.names = NULL)
   }))
@@ -860,7 +888,7 @@ mo_run <- function(cfg_path) {
 
   cat("2. Основні території: кут, пороги, вплив сезонів, стабільність\n"); flush.console()
   items <- lapply(seq_len(nrow(series_terr)), function(i) list(row = series_terr[i, ], d = ser[[series_terr$id[i]]], eval_seasons = sel[[series_terr$id[i]]]$eval_seasons,
-                                                         truth_angle = sel[[series_terr$id[i]]]$truth_angle))
+                                                         truth_angle = sel[[series_terr$id[i]]]$truth_angle, noepi = sel[[series_terr$id[i]]]$noepi))
   tr <- mo_pmap(items, mo_territory, cfg)
   tabs <- do.call(rbind, lapply(tr, `[[`, "res"))
   scans <- do.call(rbind, lapply(tr, `[[`, "scan"))
@@ -913,6 +941,7 @@ mo_run <- function(cfg_path) {
   thr_all$infl_max_pct <- round(as.numeric(imax[rid]), 1)
   thr_all$loss <- pk$loss[match(thr_all$id, pk$id)]
   thr_all$note <- pk$note[match(thr_all$id, pk$id)]
+  thr_all$noepi <- vapply(thr_all$id, function(id) if (!is.null(sel[[id]])) paste(sel[[id]]$noepi, collapse = ", ") else NA_character_, character(1))
   thr_all$truth_angle <- vapply(thr_all$id, function(id) if (!is.null(sel[[id]])) as.numeric(sel[[id]]$truth_angle) else NA_real_, numeric(1))
   changes <- mo_changes(thr_all, out_dir, cfg)
   write.csv(thr_all, file.path(out_dir, "memopt_thresholds.csv"), row.names = FALSE, fileEncoding = "UTF-8")
