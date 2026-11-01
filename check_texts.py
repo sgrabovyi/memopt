@@ -104,7 +104,8 @@ for f in glob.glob("docs/*.md"):
                 errors.append(f"{f}:{i}: {cells[0]}, «{h}» {c} у тексті, у розрахунку {r[k]:.0f}")
 
 # Дата розрахунку в тексті проти дати останнього розрахунку
-run_day = date.fromtimestamp(os.path.getmtime("output/memopt_thresholds.csv")).strftime("%d.%m.%Y")
+from thresholds_date import thresholds_date
+run_day = thresholds_date()  # день, коли пороги востаннє змінились
 for f in TEXT_FILES:
     for i, s in enumerate(open(f, encoding="utf-8").read().splitlines(), 1):
         for m in re.finditer(r"(розрахун\w*|запуск\w*)[^.|]{0,60}?від (\d\d\.\d\d\.\d{4})", s):
@@ -115,10 +116,11 @@ for f in TEXT_FILES:
                 errors.append(f"{f}:{i}: у тексті розрахунок від {m.group(2)}, останній розрахунок {run_day}")
 
 # Ручні документи, старіші за розрахунок
-t_run = os.path.getmtime("output/memopt_thresholds.csv")
+from datetime import datetime
+t_run = datetime.strptime(run_day, "%d.%m.%Y").timestamp()  # ручний текст має бути не старшим за день зміни порогів
 for f in HAND:
     if os.path.exists(f) and os.path.getmtime(f) < t_run:
-        warns.append(f"{f}: написаний вручну і старіший за останній розрахунок, перечитайте числа і твердження")
+        warns.append(f"{f}: написаний вручну раніше, ніж змінились пороги: перечитайте числа і твердження")
 
 for e in errors:
     print("ПОМИЛКА", e)

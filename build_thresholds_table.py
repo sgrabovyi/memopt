@@ -23,7 +23,8 @@ last = max(s.strip() for v in T["seasons_used"].dropna() for s in str(v).split("
 y = int(last[5:9]); SEASON = "%d/%d" % (y, y + 1)
 OUT = os.path.join(HERE, "docs", "Пороги_%s_таблиця.docx" % SEASON.replace("/", "-"))
 import sys
-RUN_DAY = sys.argv[1] if len(sys.argv) > 1 else date.fromtimestamp(os.path.getmtime(THR)).strftime("%d.%m.%Y")
+from thresholds_date import thresholds_date
+RUN_DAY = sys.argv[1] if len(sys.argv) > 1 else thresholds_date()
 
 terr = pd.read_csv(os.path.join(HERE, "input", "territories.csv"))
 LEVELS = [("base", "Епідемічний"), ("medium", "Середній"), ("high", "Високий"), ("veryhigh", "Дуже високий")]
