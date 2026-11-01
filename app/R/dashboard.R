@@ -98,6 +98,12 @@ dashboard_server <- function(input, output, session, P, rv) {
       file.copy(cur, file.path(arch, sprintf("Dim_Thresholds_%s.prev_%s.xlsx", es, format(Sys.time(), "%Y-%m-%d_%H%M"))))
     }
     openxlsx::write.xlsx(new, cur, sheetName = "Dim_Thresholds", overwrite = TRUE)
+    # еталони громад і правило підтвердження районом для ETL (input/Dim_Reference.csv)
+    terr <- read.csv(file.path(proj, "territories.csv"), stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = c("", "NA"), check.names = FALSE)
+    sm <- terr[terr$kind == "small", ]
+    dc <- if ("district_confirm" %in% names(sm)) as.integer(tolower(trimws(sm$district_confirm)) %in% c("так", "yes", "1")) else 0L
+    write.csv(data.frame(PCODE = sm[[1]], Ref_PCODE = sm$reference_id, District_Confirm = dc), file.path(d, "input", "Dim_Reference.csv"),
+              row.names = FALSE, fileEncoding = "UTF-8")
     rv$tick <- rv$tick + 1
     showNotification(sprintf("Пороги %d територій передано в ETL. Тепер запустіть ETL.", nrow(new)), type = "message", duration = 8)
   })

@@ -979,6 +979,11 @@ mo_run <- function(cfg_path) {
     ex_dir <- file.path(out_dir, "dashboard_export"); dir.create(ex_dir, showWarnings = FALSE)
     write.xlsx(dim, file.path(ex_dir, "Dim_Thresholds.xlsx"), sheetName = "Dim_Thresholds", overwrite = TRUE)
     write.csv(dim, file.path(ex_dir, "Dim_Thresholds.csv"), row.names = FALSE, fileEncoding = "UTF-8")
+    # еталони малих територій і правило підтвердження районом: ETL рахує, чи еталон не нижче свого епідемічного порогу
+    sm <- terr[terr$kind == "small", ]
+    dc <- if ("district_confirm" %in% names(sm)) ifelse(tolower(trimws(sm$district_confirm)) %in% c("так", "yes", "1"), 1L, 0L) else 0L
+    write.csv(data.frame(PCODE = sm$id, Ref_PCODE = sm$reference_id, District_Confirm = dc),
+              file.path(ex_dir, "Dim_Reference.csv"), row.names = FALSE, fileEncoding = "UTF-8")
   }
 
   hdr <- createStyle(textDecoration = "bold", fgFill = "#1F4E78", fontColour = "#FFFFFF", wrapText = TRUE, valign = "center")
