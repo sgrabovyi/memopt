@@ -9,6 +9,9 @@ season_running <- function(s, end_week = 20, today = Sys.Date()) {
   today <= j4 - (as.integer(format(j4, "%u")) - 1) + end_week * 7 - 1
 }
 
+# Сезон «РРРР/РРРР+1» має 53-й тиждень, якщо 28 грудня року РРРР припадає на 53-й ISO-тиждень (те саме правило в ядрі)
+has_week53 <- function(s) grepl("^[0-9]{4}/[0-9]{4}$", s) && format(as.Date(sprintf("%s-12-28", substr(s, 1, 4))), "%V") == "53"
+
 if (!exists("plur")) plur <- function(n, one, few, many) {
   n <- abs(as.integer(n))
   if (n %% 10 == 1 && n %% 100 != 11) one else if (n %% 10 %in% 2:4 && !(n %% 100 %in% 12:14)) few else many
@@ -81,8 +84,15 @@ check_sheet <- function(path, sheet) {
   if (any(duplicated(w[!is.na(w)]))) add("помилка", fn, sheet, "колонка A", paste("тиждень повторюється:", paste(unique(w[duplicated(w) & !is.na(w)]), collapse = ", ")), "Кожен тиждень має бути в одному рядку")
   has_data <- function(rows) any(vapply(2:ncol(x), function(j) any(!is.na(x[[j]][rows]) & nzchar(trimws(x[[j]][rows]))), logical(1)))
   r53 <- which(w == 53)
-  if (length(r53) && has_data(r53)) add("довідка", fn, sheet, paste0("A", r53[1] + 1), "є дані за 53-й тиждень",
-                                        "Нічого робити не треба: у сезоні з 53-м тижнем святковими вважаються тижні 53, 1 і 2 (у звичайному сезоні 52, 1 і 2), вони у розрахунок не беруться; 52-й тиждень іде в розрахунок, а сезон закінчується 19-м тижнем, як у пакеті mem")
+  if (length(r53)) for (j in 2:ncol(x)) {
+    if (!grepl("^[0-9]{4}/[0-9]{4}$", hdr[j])) next
+    v <- x[[j]][r53[1]]; filled <- !is.na(v) && nzchar(trimws(v))
+    if (filled && !has_week53(hdr[j]))
+      add("помилка", fn, sheet, paste0(col_letter(j), r53[1] + 1), sprintf("у сезоні %s немає 53-го тижня, а в рядку 53 є значення", hdr[j]),
+          sprintf("Рік %s має 52 тижні: перенесіть значення в правильний рядок або видаліть його", substr(hdr[j], 1, 4)))
+    else if (filled) add("довідка", fn, sheet, paste0(col_letter(j), r53[1] + 1), sprintf("у сезоні %s є дані за 53-й тиждень", hdr[j]),
+                         "Нічого робити не треба: у сезоні з 53-м тижнем святковими вважаються тижні 53, 1 і 2 (у звичайному сезоні 52, 1 і 2), вони в розрахунок не беруться, а 52-й тиждень іде в розрахунок зі справжніми даними")
+  }
   rsum <- which(w %in% 21:39)
   if (length(rsum) && has_data(rsum)) add("довідка", fn, sheet, "колонка A", "є дані за літні тижні 21-39",
                                           "Нічого робити не треба: пороги MEM рахуються лише за тижнями від 40 до 20")
