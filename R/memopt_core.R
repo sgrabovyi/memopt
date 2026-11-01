@@ -136,9 +136,26 @@ mo_read_raw <- function(row, cfg) {
   x <- x[, -1, drop = FALSE]
   rownames(x) <- rn
   x <- x[, !(names(x) %in% c(cfg$placeholder_seasons, mo_unfinished(names(x), cfg))), drop = FALSE]
-  x <- x[match(weeks, rn), , drop = FALSE]
-  rownames(x) <- weeks
-  x
+  out <- x[match(weeks, rn), , drop = FALSE]
+  rownames(out) <- weeks
+  hol <- cfg$season$holiday_weeks
+  # святкові тижні робляться порожніми тут, для кожного сезону за його календарем
+  for (s in names(x)) {
+    v53 <- x[match(53, rn), s]
+    if (length(v53) && !is.na(v53)) {
+      # Сезон з 53-м тижнем. Як у mem (transformdata): тиждень 53 стає на своє місце між 52-м і 1-м, ряд лишається
+      # неперервним, а сезон закінчується на тиждень раніше (end_week - 1), щоб довжина сезону не змінилась.
+      # Свята за календарем: «провал» звернень припадає на останній тиждень року, 1-й і 2-й тижні, тому замість
+      # 52-го порожнім робиться 53-й, а 52-й іде в розрахунок як звичайний тиждень.
+      seq53 <- c(cfg$season$start_week:53, 1:(cfg$season$end_week - 1))
+      out[[s]] <- x[match(seq53, rn), s]
+      h53 <- ifelse(hol == 52, 53, hol)
+      out[[s]][seq53 %in% h53] <- NA
+    } else {
+      out[[s]][weeks %in% hol] <- NA
+    }
+  }
+  out
 }
 
 # Очищення початку сезону: початкові тижні прибираються, поки показник перевищує
@@ -189,7 +206,7 @@ mo_series <- function(row, cfg, log = NULL, clean = TRUE, multiplier = NULL, com
   if (NCOL(d) > cfg$season$max_seasons) d <- d[, tail(names(d), cfg$season$max_seasons), drop = FALSE]
   ssel <- if (all_seasons) NULL else cfg$.season_sets[[row$id]]
   if (!is.null(ssel)) d <- d[, names(d) %in% unlist(ssel), drop = FALSE]
-  d[as.character(cfg$season$holiday_weeks), ] <- NA
+  # святкові тижні вже порожні після mo_read_raw (з урахуванням сезонів з 53-м тижнем)
   cs <- cfg$start_cleaning
   k <- if (is.null(multiplier)) cs$mad_multiplier else multiplier
   cw <- if (is.null(compare_weeks)) cs$compare_weeks else compare_weeks

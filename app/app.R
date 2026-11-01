@@ -3,57 +3,12 @@
 # Етап 2: перевірка даних з точним місцем і порадою, перелік територій з назв аркушів, населення громад,
 # правило підтвердження районом (кандидати за порогом статистичної надійності, чутливість, ручне додавання з причиною).
 # Етап 3: налаштування (перший сезон нинішнього періоду, виключення сезонів з причиною, ядра, адреси для сповіщень).
+# Етап 4: вкладка «Дашборд» для Сумської області (app/R/dashboard.R): передача порогів в ETL з архівом і запуск ETL.
 # Запуск: файл "Запустити_memopt.bat" або Rscript -e "shiny::runApp('app', launch.browser = TRUE)".
-# Допоміжні функції в app/R (shiny підключає їх сам): data_checks.R, territories.R.
+# Допоміжні функції в app/R (shiny підключає їх сам): project.R, data_checks.R, territories.R, dashboard.R.
 suppressPackageStartupMessages({
   library(shiny); library(bslib); library(DT); library(jsonlite)
 })
-
-APP_DIR <- normalizePath(getwd(), winslash = "/")
-ROOT <- normalizePath(file.path(APP_DIR, ".."), winslash = "/")
-CORE <- file.path(ROOT, "R", "memopt_core.R")
-PROJ_ROOT <- file.path(ROOT, "projects")
-TEMPLATE <- file.path(ROOT, "templates", "config_template.json")
-dir.create(PROJ_ROOT, showWarnings = FALSE)
-# сезони, які ядро відсікає завжди: беруться з самого ядра, щоб перелік у застосунку не розходився з розрахунком
-AUTO_EXCLUDE <- local({
-  src <- readLines(CORE, encoding = "UTF-8")
-  i <- grep("^MO_AUTO_EXCLUDE <- ", src); j <- i
-  while (!grepl("\\)\\s*$", src[j])) j <- j + 1
-  eval(parse(text = src[i:j], encoding = "UTF-8"))
-})
-RELIABILITY_DEFAULT <- 20
-SENS_LEVELS <- c(10, 15, 20, 25, 30)
-
-plur <- function(n, one, few, many) {
-  n <- abs(as.integer(n))
-  if (n %% 10 == 1 && n %% 100 != 11) one else if (n %% 10 %in% 2:4 && !(n %% 100 %in% 12:14)) few else many
-}
-
-# ---------------------------------------------------------------- проєкти
-list_projects <- function() sort(basename(list.dirs(PROJ_ROOT, recursive = FALSE)))
-proj_dir <- function(p) file.path(PROJ_ROOT, p)
-
-safe_name <- function(x) {
-  x <- trimws(gsub("[\\\\/:*?\"<>|]", " ", x))
-  gsub("\\s+", " ", x)
-}
-
-read_cfg <- function(p) fromJSON(file.path(proj_dir(p), "config.json"), simplifyVector = FALSE)
-write_cfg <- function(p, cfg) writeLines(toJSON(cfg, auto_unbox = TRUE, pretty = TRUE, null = "null"), file.path(proj_dir(p), "config.json"), useBytes = TRUE)
-
-create_project <- function(name) {
-  d <- proj_dir(name)
-  dir.create(file.path(d, "datasets"), recursive = TRUE, showWarnings = FALSE)
-  dir.create(file.path(d, "output"), showWarnings = FALSE)
-  cfg <- fromJSON(TEMPLATE, simplifyVector = FALSE)
-  cfg$project <- name
-  cfg$paths <- list(series_dir = "datasets", territories = "territories.csv", output_dir = "output")
-  cfg$export <- NULL
-  cfg$parallel <- list(workers = max(1L, min(6L, parallel::detectCores() - 1L)))
-  writeLines(toJSON(cfg, auto_unbox = TRUE, pretty = TRUE, null = "null"), file.path(d, "config.json"), useBytes = TRUE)
-  invisible(d)
-}
 
 dataset_table <- function(p) {
   f <- dataset_files(file.path(proj_dir(p), "datasets"))
@@ -195,7 +150,9 @@ ui <- page_navbar(
            tableOutput("settings"),
            tags$hr(),
            actionButton("save_settings", "Зберегти налаштування", class = "btn-primary"),
-           uiOutput("settings_saved"))))
+           uiOutput("settings_saved")))),
+  # вкладка дашборда лише в нашій інсталяції (файл app/R/dashboard.R у пакет для ЦГЗ не входить)
+  if (exists("dashboard_ui")) dashboard_ui()
 )
 
 # ---------------------------------------------------------------- логіка
@@ -499,6 +456,8 @@ server <- function(input, output, session) {
     if (is.null(rv$settings_saved)) return(NULL)
     tags$p(class = "text-success", style = "margin-top:10px", sprintf("Збережено о %s. Нові налаштування подіють під час наступного розрахунку порогів.", rv$settings_saved))
   })
+
+  if (exists("dashboard_server")) dashboard_server(input, output, session, P, rv)
 
   session$onSessionEnded(function() { j <- isolate(rv$job); if (!is.null(j) && j$is_alive()) j$kill() })
 }
