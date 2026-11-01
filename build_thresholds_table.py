@@ -1,6 +1,7 @@
 # Таблиця порогів у Word: область, райони і громади, згруповані за районами, чотири пороги на 100 тис. за тиждень.
 # Дані з output/memopt_thresholds.csv і input/territories.csv. Результат: docs/Пороги_<сезон>_таблиця.docx
-# Запуск: python build_thresholds_table.py (після run_optimizer.R; входить у build_all.py)
+# Запуск вручну, раз на сезон: python build_thresholds_table.py [дата для підзаголовка ДД.ММ.РРРР]
+# Сезон визначається з розрахунку: наступний після останнього сезону, взятого в пороги.
 import json
 import os
 from datetime import date
@@ -16,12 +17,14 @@ from docx.shared import Cm, Pt, RGBColor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
-SEASON = (CFG.get("placeholder_seasons") or ["2026/2027"])[0]
 THR = os.path.join(HERE, "output", "memopt_thresholds.csv")
-OUT = os.path.join(HERE, "docs", "Пороги_%s_таблиця.docx" % SEASON.replace("/", "-"))
-RUN_DAY = date.fromtimestamp(os.path.getmtime(THR)).strftime("%d.%m.%Y")
-
 T = pd.read_csv(THR).set_index("id")
+last = max(s.strip() for v in T["seasons_used"].dropna() for s in str(v).split(","))
+y = int(last[5:9]); SEASON = "%d/%d" % (y, y + 1)
+OUT = os.path.join(HERE, "docs", "Пороги_%s_таблиця.docx" % SEASON.replace("/", "-"))
+import sys
+RUN_DAY = sys.argv[1] if len(sys.argv) > 1 else date.fromtimestamp(os.path.getmtime(THR)).strftime("%d.%m.%Y")
+
 terr = pd.read_csv(os.path.join(HERE, "input", "territories.csv"))
 LEVELS = [("base", "Епідемічний"), ("medium", "Середній"), ("high", "Високий"), ("veryhigh", "Дуже високий")]
 # кольори заголовків рівнів (ті самі відтінки, що в рисунках і дашборді); для жовтого темний текст
@@ -79,7 +82,7 @@ st.element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
 p = doc.add_paragraph(); r = p.add_run("Епідемічні пороги захворюваності на ГРВІ на сезон %s" % SEASON)
 r.bold = True; r.font.size = Pt(16); r.font.color.rgb = RGBColor.from_string("17345E"); p.paragraph_format.space_after = Pt(2)
 p = doc.add_paragraph(); r = p.add_run("Сумська область, райони і територіальні громади за районами. "
-                                       "Випадків ГРВІ на 100 тис. населення за тиждень. Розрахунок методом рухомої епідемії (MEM), memopt, %s." % RUN_DAY)
+                                       "Випадків ГРВІ на 100 тис. населення за тиждень. Розрахунок методом рухомої епідемії (MEM), %s." % RUN_DAY)
 r.font.size = Pt(10); r.font.color.rgb = RGBColor.from_string("555555"); p.paragraph_format.space_after = Pt(8)
 
 tbl = doc.add_table(rows=1, cols=5)
