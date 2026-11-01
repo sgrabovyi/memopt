@@ -2,6 +2,18 @@
 # (файл, аркуш, клітинка) і порадою, як виправити. Рівень «помилка» не дає запустити розрахунок, «увага» лише попереджає.
 WEEKS_ALL <- c(40:52, 1:20)
 
+# Сезон ще триває, якщо сьогодні не пізніше неділі 20-го тижня (ISO) його другого року; ядро такий сезон відкидає саме
+season_running <- function(s, end_week = 20, today = Sys.Date()) {
+  if (!grepl("^[0-9]{4}/[0-9]{4}$", s)) return(FALSE)
+  y <- as.integer(substr(s, 6, 9)); j4 <- as.Date(sprintf("%d-01-04", y))
+  today <= j4 - (as.integer(format(j4, "%u")) - 1) + end_week * 7 - 1
+}
+
+if (!exists("plur")) plur <- function(n, one, few, many) {
+  n <- abs(as.integer(n))
+  if (n %% 10 == 1 && n %% 100 != 11) one else if (n %% 10 %in% 2:4 && !(n %% 100 %in% 12:14)) few else many
+}
+
 col_letter <- function(i) {
   s <- ""
   while (i > 0) { r <- (i - 1) %% 26; s <- paste0(LETTERS[r + 1], s); i <- (i - 1) %/% 26 }
@@ -69,8 +81,9 @@ check_sheet <- function(path, sheet) {
     big <- which(!is.na(num) & num > 10000)
     if (length(big)) add("увага", fn, sheet, paste(paste0(col_letter(j), head(big, 4) + 1), collapse = ", "), sprintf("у сезоні %s значення понад 10 000", hdr[j]),
                          "Перевірте, що це показник на 100 тис. населення за тиждень, а не кількість випадків")
-    if (sum(!is.na(num)) > 0 && sum(!is.na(num)) < 10) add("увага", fn, sheet, col_letter(j), sprintf("у сезоні %s лише %d тижнів з даними", hdr[j], sum(!is.na(num))),
-                                                         "Сезон з менш ніж 10 тижнями даних у розрахунок не потрапить")
+    nw <- sum(!is.na(num))
+    if (nw > 0 && nw < 10 && !season_running(hdr[j])) add("увага", fn, sheet, col_letter(j), sprintf("у сезоні %s лише %d %s з даними", hdr[j], nw, plur(nw, "тиждень", "тижні", "тижнів")),
+                                                          "Сезон з менш ніж 10 тижнями даних у розрахунок не потрапить")
   }
   if (length(res)) do.call(rbind, res) else NULL
 }
