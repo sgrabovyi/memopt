@@ -18,7 +18,8 @@ if (getRversion() < "4.2") cat("УВАГА: потрібен R 4.2 або нов
 #   jsonlite  читання config.json
 #   dplyr, tidyr  обробка таблиць
 #   shiny, bslib, DT, callr  застосунок memopt (вікно в браузері, таблиці, розрахунок у фоні)
-required <- c("mem", "readxl", "openxlsx", "jsonlite", "dplyr", "tidyr", "shiny", "bslib", "DT", "callr")
+#   curl      сповіщення поштою і в Telegram
+required <- c("mem", "readxl", "openxlsx", "jsonlite", "dplyr", "tidyr", "shiny", "bslib", "DT", "callr", "curl")
 
 installed <- function() rownames(installed.packages())
 missing_req <- setdiff(required, installed())

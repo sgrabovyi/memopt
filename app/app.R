@@ -4,6 +4,7 @@
 # правило підтвердження районом (кандидати за порогом статистичної надійності, чутливість, ручне додавання з причиною).
 # Етап 3: налаштування (перший сезон нинішнього періоду, виключення сезонів з причиною, ядра, адреси для сповіщень).
 # Етап 4: вкладка «Дашборд» для Сумської області (app/R/dashboard.R): передача порогів в ETL з архівом і запуск ETL.
+# Етап 5: сповіщення поштою і в Telegram, щотижневий розклад (app/R/notify.R, run_scheduled.R).
 # Запуск: файл "Запустити_memopt.bat" або Rscript -e "shiny::runApp('app', launch.browser = TRUE)".
 # Допоміжні функції в app/R (shiny підключає їх сам): project.R, data_checks.R, territories.R, dashboard.R.
 suppressPackageStartupMessages({
@@ -143,8 +144,34 @@ ui <- page_navbar(
            numericInput("workers", "Скільки ядер процесора використовувати", value = 2, min = 1, max = parallel::detectCores(), step = 1),
            note(sprintf("На цьому комп'ютері %d ядер. Що більше ядер, то швидше розрахунок, але комп'ютер під час нього працює повільніше. На слабкому комп'ютері поставте 2.", parallel::detectCores())),
            tags$hr(),
-           textAreaInput("emails", "Адреси для сповіщень (кожна з нового рядка)", rows = 4, placeholder = "epid@cgz.example.ua"),
-           note("Сюди надходитимуть повідомлення про перерахунок порогів і збої розрахунку за розкладом. Надсилання з'явиться на етапі розкладу; зараз адреси лише зберігаються."),
+           tags$h6("Сповіщення"),
+           note("Повідомлення надходять, коли пороги перераховано за розкладом або коли розрахунок за розкладом зупинився з помилкою."),
+           radioButtons("n_method", NULL, c("Не надсилати" = "none", "Пошта" = "email", "Telegram" = "telegram", "Пошта і Telegram" = "both"), inline = TRUE),
+           conditionalPanel("input.n_method == 'email' || input.n_method == 'both'",
+             textAreaInput("emails", "Адреси отримувачів (кожна з нового рядка)", rows = 3, placeholder = "epid@cgz.example.ua"),
+             layout_columns(col_widths = c(8, 4), textInput("smtp_server", "Поштовий сервер (SMTP)", placeholder = "smtp.gmail.com"),
+                            numericInput("smtp_port", "Порт", value = 465, min = 1, max = 65535)),
+             layout_columns(col_widths = c(6, 6), textInput("smtp_user", "Логін", placeholder = "memopt.oblast@gmail.com"),
+                            passwordInput("smtp_password", "Пароль", placeholder = "залиште порожнім, щоб не змінювати")),
+             textInput("smtp_from", "Адреса відправника (якщо інша, ніж логін)"),
+             note("Для Gmail: сервер smtp.gmail.com, порт 465, пароль застосунку (Google Account, Безпека, Паролі застосунків), а не звичайний пароль.")),
+           conditionalPanel("input.n_method == 'telegram' || input.n_method == 'both'",
+             passwordInput("tg_token", "Токен бота Telegram", placeholder = "залиште порожнім, щоб не змінювати"),
+             textInput("tg_chats", "Чати (номери через кому)", placeholder = "-1001234567890"),
+             note("Бота створює @BotFather; бота треба додати в групу або канал. Номер чату можна дізнатися, написавши боту і відкривши https://api.telegram.org/bot<токен>/getUpdates.")),
+           note("Паролі й токени зберігаються окремо від налаштувань, у файлі secrets.json у папці проєкту."),
+           actionButton("n_test", "Надіслати пробне повідомлення", class = "btn-outline-primary btn-sm"),
+           uiOutput("n_test_result"),
+           tags$hr(),
+           tags$h6("Розклад"),
+           note("Щотижнева перевірка: якщо в даних з'явився новий завершений сезон (після 20-го тижня), пороги перераховуються, і надходить сповіщення. Розрахунок на вимогу, як і раніше, кнопкою на вкладці «Розрахунок»."),
+           layout_columns(col_widths = c(6, 6),
+             selectInput("sch_day", "День", c("понеділок" = "MON", "вівторок" = "TUE", "середа" = "WED", "четвер" = "THU", "п'ятниця" = "FRI")),
+             textInput("sch_time", "Час", value = "09:00")),
+           uiOutput("sch_status"),
+           layout_columns(col_widths = c(6, 6),
+             actionButton("sch_on", "Увімкнути розклад", class = "btn-outline-primary btn-sm"),
+             actionButton("sch_off", "Вимкнути розклад", class = "btn-outline-danger btn-sm")),
            tags$hr(),
            tags$h6("Інші параметри (лише для перегляду)"),
            tableOutput("settings"),
@@ -408,7 +435,14 @@ server <- function(input, output, session) {
     updateSelectInput(session, "ex_season", choices = setdiff(seas, names(AUTO_EXCLUDE)))
     updateSelectInput(session, "ex_terr", choices = c("усі території" = "", setNames(unname(ids), names(ids))))
     updateNumericInput(session, "workers", value = if (is.null(cfg$parallel$workers)) 2 else cfg$parallel$workers)
-    updateTextAreaInput(session, "emails", value = paste(unlist(cfg$notifications$emails), collapse = "\n"))
+    n <- cfg$notifications
+    updateTextAreaInput(session, "emails", value = paste(unlist(n$emails), collapse = "\n"))
+    updateRadioButtons(session, "n_method", selected = if (is.null(n$method)) "none" else n$method)
+    updateTextInput(session, "smtp_server", value = if (is.null(n$smtp$server)) "" else n$smtp$server)
+    updateNumericInput(session, "smtp_port", value = if (is.null(n$smtp$port)) 465 else n$smtp$port)
+    updateTextInput(session, "smtp_user", value = if (is.null(n$smtp$user)) "" else n$smtp$user)
+    updateTextInput(session, "smtp_from", value = if (is.null(n$smtp$from)) "" else n$smtp$from)
+    updateTextInput(session, "tg_chats", value = paste(unlist(n$telegram$chats), collapse = ", "))
     ex <- list()
     for (s in names(cfg$exclude_seasons)) ex[[length(ex) + 1]] <- data.frame(Сезон = s, Територія = "усі території", Код = "", Причина = cfg$exclude_seasons[[s]])
     for (id in names(cfg$exclude_territory_seasons)) for (s in names(cfg$exclude_territory_seasons[[id]]))
@@ -434,12 +468,13 @@ server <- function(input, output, session) {
     i <- input$ex_table_rows_selected
     if (length(i)) rv$ex <- rv$ex[-i, ] else showNotification("Позначте рядок у таблиці виключень.", type = "warning")
   })
-  observeEvent(input$save_settings, {
+  # збереження всіх налаштувань; повертає FALSE, якщо щось введено неправильно
+  save_all <- function() {
     em <- trimws(unlist(strsplit(input$emails, "[\n,;]+"))); em <- em[nzchar(em)]
     bad <- em[!grepl("^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$", em)]
-    if (length(bad)) { showNotification(paste("Неправильна адреса:", paste(bad, collapse = ", ")), type = "error"); return() }
+    if (length(bad)) { showNotification(paste("Неправильна адреса:", paste(bad, collapse = ", ")), type = "error"); return(FALSE) }
     w <- input$workers
-    if (is.na(w) || w < 1) { showNotification("Кількість ядер має бути не менше 1.", type = "error"); return() }
+    if (is.na(w) || w < 1) { showNotification("Кількість ядер має бути не менше 1.", type = "error"); return(FALSE) }
     cfg <- read_cfg(P())
     cfg$season_selection$era_start <- input$era_start
     cfg$season_selection$not_validation <- if (isTRUE(input$era_first_not_ctl)) list(input$era_start) else list()
@@ -448,10 +483,48 @@ server <- function(input, output, session) {
     cfg$exclude_territory_seasons <- setNames(list(), character(0))
     for (id in unique(one_ex$Код)) { r <- one_ex[one_ex$Код == id, ]; cfg$exclude_territory_seasons[[id]] <- setNames(as.list(r$Причина), r$Сезон) }
     cfg$parallel$workers <- as.integer(min(w, parallel::detectCores()))
-    cfg$notifications$emails <- as.list(em)
+    chats <- trimws(unlist(strsplit(input$tg_chats, "[,; ]+"))); chats <- chats[nzchar(chats)]
+    cfg$notifications <- list(method = input$n_method, emails = as.list(em),
+                              smtp = list(server = trimws(input$smtp_server), port = as.integer(input$smtp_port), user = trimws(input$smtp_user), from = trimws(input$smtp_from)),
+                              telegram = list(chats = as.list(chats)))
     write_cfg(P(), cfg)
+    sec <- read_secrets(proj_dir(P()))
+    if (nzchar(input$smtp_password)) sec$smtp_password <- input$smtp_password
+    if (nzchar(input$tg_token)) sec$telegram_token <- trimws(input$tg_token)
+    write_secrets(proj_dir(P()), sec)
+    updateTextInput(session, "smtp_password", value = ""); updateTextInput(session, "tg_token", value = "")
     rv$settings_saved <- format(Sys.time(), "%H:%M")
+    TRUE
+  }
+  observeEvent(input$save_settings, save_all())
+  observeEvent(input$n_test, {
+    if (!save_all()) return()
+    r <- notify(proj_dir(P()), "memopt: пробне повідомлення", paste0("Це пробне повідомлення застосунку memopt, проєкт «", P(), "». Якщо ви його отримали, сповіщення налаштовано правильно."))
+    rv$n_test <- r
   })
+  output$n_test_result <- renderUI({
+    r <- rv$n_test; if (is.null(r)) return(NULL)
+    tags$div(style = "margin-top:8px", lapply(r, function(x) tags$p(class = if (grepl("помилка", x)) "text-danger" else "text-success", x)))
+  })
+  # розклад: завдання планувальника Windows; під час увімкнення запам'ятовується поточний останній сезон, щоб
+  # перша перевірка не перераховувала пороги без нового сезону
+  output$sch_status <- renderUI({
+    rv$sch
+    st <- task_status(P())
+    if (is.null(st)) return(note("Розклад вимкнено."))
+    nxt <- sub("^[^:]+:\\s*", "", grep("Next Run Time|Наступний запуск|Время следующего запуска", st, value = TRUE)[1])
+    tags$p(class = "text-success", "Розклад увімкнено.", if (!is.na(nxt)) paste(" Наступна перевірка:", nxt))
+  })
+  observeEvent(input$sch_on, {
+    if (!save_all()) return()
+    if (!grepl("^[0-2][0-9]:[0-5][0-9]$", input$sch_time)) { showNotification("Час у вигляді 09:00.", type = "error"); return() }
+    s <- all_seasons(file.path(proj_dir(P()), "datasets")); s <- s[!vapply(s, season_running, logical(1))]
+    if (length(s)) writeLines(toJSON(list(last_season = max(s)), auto_unbox = TRUE), file.path(proj_dir(P()), "output", "розклад_стан.json"))
+    r <- tryCatch({ task_create(P(), proj_dir(P()), ROOT, input$sch_day, input$sch_time); "ok" }, error = function(e) conditionMessage(e))
+    if (identical(r, "ok")) showNotification("Розклад увімкнено.", type = "message") else showNotification(paste("Не вдалося створити завдання:", r), type = "error", duration = 15)
+    rv$sch <- Sys.time()
+  })
+  observeEvent(input$sch_off, { task_delete(P()); rv$sch <- Sys.time(); showNotification("Розклад вимкнено.", type = "message") })
   output$settings_saved <- renderUI({
     if (is.null(rv$settings_saved)) return(NULL)
     tags$p(class = "text-success", style = "margin-top:10px", sprintf("Збережено о %s. Нові налаштування подіють під час наступного розрахунку порогів.", rv$settings_saved))
