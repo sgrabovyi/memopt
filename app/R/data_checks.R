@@ -42,6 +42,16 @@ scan_sheets <- function(dir) {
   if (length(out)) do.call(rbind, out) else data.frame(file = character(0), sheet = character(0), seasons = integer(0), first = character(0), last = character(0))
 }
 
+# Усі сезони, що трапляються в назвах колонок файлів проєкту, за зростанням
+all_seasons <- function(dir) {
+  s <- character(0)
+  for (f in dataset_files(dir)) for (sh in tryCatch(readxl::excel_sheets(f), error = function(e) character(0))) {
+    h <- tryCatch(names(readxl::read_excel(f, sheet = sh, n_max = 0)), error = function(e) character(0))
+    s <- c(s, h[grepl("^[0-9]{4}/[0-9]{4}$", h)])
+  }
+  sort(unique(s))
+}
+
 check_sheet <- function(path, sheet) {
   fn <- basename(path); res <- list()
   add <- function(...) res[[length(res) + 1]] <<- msg(...)
@@ -69,6 +79,22 @@ check_sheet <- function(path, sheet) {
   if (length(miss) && length(miss) < 33) add("увага", fn, sheet, "колонка A", paste("немає рядків для тижнів", paste(miss, collapse = ", ")), "Додайте ці тижні, навіть якщо даних за них немає (клітинки можна лишити порожніми)")
   if (length(miss) == 33) add("помилка", fn, sheet, "колонка A", "у першій колонці немає номерів тижнів", "У першій колонці мають бути тижні від 40 до 52, потім від 1 до 20")
   if (any(duplicated(w[!is.na(w)]))) add("помилка", fn, sheet, "колонка A", paste("тиждень повторюється:", paste(unique(w[duplicated(w) & !is.na(w)]), collapse = ", ")), "Кожен тиждень має бути в одному рядку")
+  has_data <- function(rows) any(vapply(2:ncol(x), function(j) any(!is.na(x[[j]][rows]) & nzchar(trimws(x[[j]][rows]))), logical(1)))
+  r53 <- which(w == 53)
+  if (length(r53) && has_data(r53)) add("довідка", fn, sheet, paste0("A", r53[1] + 1), "є дані за 53-й тиждень",
+                                        "Нічого робити не треба: 53-й тиждень припадає на новорічні свята і, як тижні 52, 1 і 2, у розрахунок порогів не береться")
+  rsum <- which(w %in% 21:39)
+  if (length(rsum) && has_data(rsum)) add("довідка", fn, sheet, "колонка A", "є дані за літні тижні 21-39",
+                                          "Нічого робити не треба: пороги MEM рахуються лише за тижнями від 40 до 20")
+  # однакові сезони на одному аркуші: зазвичай колонку скопійовано помилково
+  sc <- which(grepl("^[0-9]{4}/[0-9]{4}$", hdr))
+  if (length(sc) > 1) for (a in seq_along(sc)) for (b in seq_along(sc)) if (a < b) {
+    va <- suppressWarnings(as.numeric(gsub(",", ".", x[[sc[a]]]))); vb <- suppressWarnings(as.numeric(gsub(",", ".", x[[sc[b]]])))
+    ok <- !is.na(va) & !is.na(vb)
+    if (sum(ok) >= 10 && all(va[ok] == vb[ok]) && sum(!is.na(va)) == sum(!is.na(vb)))
+      add("помилка", fn, sheet, paste0(col_letter(sc[a]), ", ", col_letter(sc[b])), sprintf("сезони %s і %s мають однакові значення", hdr[sc[a]], hdr[sc[b]]),
+          "Схоже, колонку скопійовано: вставте правильні дані одного з сезонів")
+  }
   # значення
   for (j in 2:ncol(x)) {
     if (!grepl("^[0-9]{4}/[0-9]{4}$", hdr[j])) next
@@ -96,7 +122,19 @@ check_datasets <- function(dir) {
   d <- sheets$sheet[duplicated(sheets$sheet)]
   for (s in unique(d)) res[[length(res) + 1]] <- msg("помилка", paste(sheets$file[sheets$sheet == s], collapse = ", "), s, "", "аркуш з такою назвою є в кількох файлах",
                                                        "Назва аркуша це назва території, вона має бути єдиною: перейменуйте або видаліть зайвий аркуш")
-  for (f in files) for (s in tryCatch(readxl::excel_sheets(f), error = function(e) character(0))) res[[length(res) + 1]] <- check_sheet(f, s)
+  sig <- character(0); sig_where <- character(0)
+  for (f in files) for (s in tryCatch(readxl::excel_sheets(f), error = function(e) character(0))) {
+    res[[length(res) + 1]] <- check_sheet(f, s)
+    # однакові дані на різних аркушах: зазвичай аркуш території скопійовано з іншого
+    v <- tryCatch(suppressWarnings(as.matrix(readxl::read_excel(f, sheet = s, col_types = "numeric"))[, -1, drop = FALSE]), error = function(e) NULL)
+    if (!is.null(v) && sum(!is.na(v)) >= 20) {
+      key <- paste(round(v[!is.na(v)], 3), collapse = ";")
+      hit <- match(key, sig)
+      if (!is.na(hit)) res[[length(res) + 1]] <- msg("помилка", basename(f), s, "", sprintf("дані аркуша повністю збігаються з аркушем «%s»", sig_where[hit]),
+                                                     "Схоже, аркуш скопійовано з іншої території: вставте дані цієї території")
+      sig <- c(sig, key); sig_where <- c(sig_where, s)
+    }
+  }
   res <- res[!vapply(res, is.null, logical(1))]
   if (length(res)) do.call(rbind, res) else NULL
 }

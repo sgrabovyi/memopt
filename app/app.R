@@ -2,6 +2,7 @@
 # Етап 1: проєкти областей, завантаження даних, розрахунок у фоні з журналом, результати.
 # Етап 2: перевірка даних з точним місцем і порадою, перелік територій з назв аркушів, населення громад,
 # правило підтвердження районом (кандидати за порогом статистичної надійності, чутливість, ручне додавання з причиною).
+# Етап 3: налаштування (перший сезон нинішнього періоду, виключення сезонів з причиною, ядра, адреси для сповіщень).
 # Запуск: файл "Запустити_memopt.bat" або Rscript -e "shiny::runApp('app', launch.browser = TRUE)".
 # Допоміжні функції в app/R (shiny підключає їх сам): data_checks.R, territories.R.
 suppressPackageStartupMessages({
@@ -14,6 +15,13 @@ CORE <- file.path(ROOT, "R", "memopt_core.R")
 PROJ_ROOT <- file.path(ROOT, "projects")
 TEMPLATE <- file.path(ROOT, "templates", "config_template.json")
 dir.create(PROJ_ROOT, showWarnings = FALSE)
+# сезони, які ядро відсікає завжди: беруться з самого ядра, щоб перелік у застосунку не розходився з розрахунком
+AUTO_EXCLUDE <- local({
+  src <- readLines(CORE, encoding = "UTF-8")
+  i <- grep("^MO_AUTO_EXCLUDE <- ", src); j <- i
+  while (!grepl("\\)\\s*$", src[j])) j <- j + 1
+  eval(parse(text = src[i:j], encoding = "UTF-8"))
+})
 RELIABILITY_DEFAULT <- 20
 SENS_LEVELS <- c(10, 15, 20, 25, 30)
 
@@ -112,7 +120,7 @@ ui <- page_navbar(
     layout_columns(col_widths = c(4, 8),
       card(card_header("Завантаження"),
            fileInput("upload_xlsx", "Ряди захворюваності (Excel, можна кілька файлів)", multiple = TRUE, accept = ".xlsx", buttonLabel = "Обрати", placeholder = "файли не обрано"),
-           note("Кожен аркуш це одна територія, і назва аркуша стає назвою території: пишіть її повністю, наприклад «Конотопський район», «Конотопський район без центру», «м. Конотоп», «Буринська міська територіальна громада». Коди адмінодиниць не потрібні."),
+           note("Кожен аркуш це одна територія, і назва аркуша стає назвою території, наприклад «Конотопський район», «Конотопський район без центру», «м. Конотоп», «Буринська міська ТГ». Excel дозволяє в назві аркуша щонайбільше 31 символ: якщо повна назва довша, скоротіть її на аркуші, а повну впишіть потім на вкладці «Території». Назви в межах області мають бути різними: громади з однаковою назвою розрізніть районом у дужках. Коди адмінодиниць не потрібні."),
            note("У першій колонці тижні від 40 до 52, потім від 1 до 20; далі колонка на кожен сезон з назвою 2023/2024; значення це кількість випадків на 100 тис. населення за тиждень, як у memapp."),
            actionButton("check_data", "Перевірити дані", class = "btn-outline-primary")),
       card(card_header("Файли проєкту"), DTOutput("datasets")))),
@@ -157,9 +165,37 @@ ui <- page_navbar(
            uiOutput("rule_summary"), DTOutput("rule_list"), tags$hr(),
            tags$h6("Скільки громад потрапляє під правило за різного порогу надійності"), tableOutput("rule_sens")))),
   nav_panel("Налаштування",
-    card(card_header("Налаштування розрахунку"),
-         tags$p("Поки що налаштування беруться з типового шаблону і однакові для всіх областей. На етапі 3 тут можна буде задати перший сезон нинішнього періоду, виключити сезон з причиною для всіх територій або однієї, вказати адреси для сповіщень."),
-         tableOutput("settings")))
+    layout_columns(col_widths = c(6, 6),
+      card(card_header("Сезони"),
+           selectInput("era_start", "Перший сезон нинішнього періоду", choices = NULL),
+           note("З цього сезону починається період, у якому умови спостереження порівнянні з нинішніми (у Сумській області після початку повномасштабної війни це 2023/2024). Сезони цього періоду завжди входять у розрахунок, старші додаються, лише якщо покращують результат."),
+           checkboxInput("era_first_not_ctl", "Перший сезон періоду не є контрольним (на ньому пороги не перевіряються)", value = TRUE),
+           note("Залиште позначку, якщо перший сезон періоду нетиповий, наприклад почався на хвилі COVID-19."),
+           tags$hr(),
+           tags$h6("Сезони, які програма відсікає сама"),
+           tableOutput("auto_excl"),
+           tags$hr(),
+           tags$h6("Виключити сезон з розрахунку"),
+           note("Лише для сезонів з вадами даних (збій обліку, зміна визначення випадку) або незвичайним спалахом. Причина обов'язкова: вона потрапляє в книгу результатів."),
+           layout_columns(col_widths = c(4, 8),
+             selectInput("ex_season", "Сезон", choices = NULL),
+             selectInput("ex_terr", "Для якої території", choices = NULL)),
+           textInput("ex_reason", "Причина", placeholder = "Наприклад: звітність громад не надходила з 3-го по 9-й тиждень"),
+           actionButton("ex_add", "Додати виключення", class = "btn-outline-primary"),
+           tags$div(style = "margin-top:10px", DTOutput("ex_table")),
+           actionButton("ex_del", "Видалити позначене виключення", class = "btn-outline-danger btn-sm")),
+      card(card_header("Розрахунок і сповіщення"),
+           numericInput("workers", "Скільки ядер процесора використовувати", value = 2, min = 1, max = parallel::detectCores(), step = 1),
+           note(sprintf("На цьому комп'ютері %d ядер. Що більше ядер, то швидше розрахунок, але комп'ютер під час нього працює повільніше. На слабкому комп'ютері поставте 2.", parallel::detectCores())),
+           tags$hr(),
+           textAreaInput("emails", "Адреси для сповіщень (кожна з нового рядка)", rows = 4, placeholder = "epid@cgz.example.ua"),
+           note("Сюди надходитимуть повідомлення про перерахунок порогів і збої розрахунку за розкладом. Надсилання з'явиться на етапі розкладу; зараз адреси лише зберігаються."),
+           tags$hr(),
+           tags$h6("Інші параметри (лише для перегляду)"),
+           tableOutput("settings"),
+           tags$hr(),
+           actionButton("save_settings", "Зберегти налаштування", class = "btn-primary"),
+           uiOutput("settings_saved"))))
 )
 
 # ---------------------------------------------------------------- логіка
@@ -211,13 +247,14 @@ server <- function(input, output, session) {
     if (is.null(x)) return(note("Дані ще не перевірялись."))
     if (!nrow(x)) return(tags$p(class = "text-success", tags$b("Помилок у даних не знайдено.")))
     e <- sum(x$Рівень == "помилка"); w <- sum(x$Рівень == "увага")
+    if (!e && !w) return(tags$p(class = "text-success", tags$b("Помилок у даних не знайдено."), " Нижче лише довідкові повідомлення."))
     tags$p(tags$b(sprintf("%d %s і %d %s.", e, plur(e, "помилка", "помилки", "помилок"), w, plur(w, "попередження", "попередження", "попереджень"))),
-           " Помилки треба виправити у файлах Excel і завантажити їх знову; попередження варто переглянути.")
+           " Помилки треба виправити у файлах Excel і завантажити їх знову; попередження варто переглянути; довідка лише пояснює, що програма робить з даними.")
   })
   output$data_check <- renderDT({
     x <- rv$data_chk; if (is.null(x) || !nrow(x)) x <- data.frame(Повідомлення = "Помилок немає")
     datatable(x, rownames = FALSE, filter = "top", options = list(pageLength = 25, language = list(search = "Пошук:", emptyTable = "Помилок немає"))) |>
-      (\(d) if ("Рівень" %in% names(x)) formatStyle(d, "Рівень", color = styleEqual(c("помилка", "увага"), c("#B83227", "#9A6700")), fontWeight = "bold") else d)()
+      (\(d) if ("Рівень" %in% names(x)) formatStyle(d, "Рівень", color = styleEqual(c("помилка", "увага", "довідка"), c("#B83227", "#9A6700", "#5b6573")), fontWeight = "bold") else d)()
   })
 
   # ----- території
@@ -293,8 +330,17 @@ server <- function(input, output, session) {
     if (is.null(j)) return(NULL)
     if (j$is_alive()) return(tags$p(tags$b("Розрахунок іде.")))
     if (identical(rv$msg, "done")) tags$p(class = "text-success", tags$b("Готово. Результати на вкладках «Результати» і «Правило для малих громад»."))
-    else tags$p(class = "text-danger", tags$b("Розрахунок зупинився з помилкою: див. останні рядки журналу."))
+    else {
+      # непередбачена помилка: показати її людською мовою і дати зберегти журнал для розробника
+      lg <- if (!is.null(rv$log) && file.exists(rv$log)) readLines(rv$log, warn = FALSE, encoding = "UTF-8") else character(0)
+      er <- grep("^Error|^Помилка|Error in|Error:", lg, value = TRUE)
+      tagList(tags$p(class = "text-danger", tags$b("Розрахунок зупинився через помилку, яку перевірка даних не впізнала.")),
+              if (length(er)) tags$p("Повідомлення програми: ", tags$code(tail(er, 1))),
+              tags$p("Якщо з повідомлення незрозуміло, що виправити в даних, збережіть журнал і надішліть його розробнику."),
+              downloadButton("dl_log", "Зберегти журнал розрахунку"))
+    }
   })
+  output$dl_log <- downloadHandler(filename = function() paste0("memopt_журнал_", P(), ".txt"), content = function(file) file.copy(rv$log, file))
 
   # ----- результати
   thr <- reactive({
@@ -375,12 +421,84 @@ server <- function(input, output, session) {
   })
 
   output$settings <- renderTable({
+    rv$settings_saved
     f <- file.path(proj_dir(P()), "config.json"); if (!file.exists(f)) return(NULL)
-    c <- fromJSON(f, simplifyVector = TRUE); ss <- c$season_selection
-    data.frame(Параметр = c("Перший сезон нинішнього періоду", "Сезони, що не є контрольними", "Кути нахилу", "Кут для меж епідемії", "Найбільше сезонів у розрахунку", "Ядер для розрахунку"),
-               Значення = c(ss$era_start, paste(ss$not_validation, collapse = ", "), paste0("від ", c$angle$min, " до ", c$angle$max, " з кроком ", c$angle$step),
-                            c$angle$truth_angle, c$season$max_seasons, c$parallel$workers), check.names = FALSE)
+    c <- fromJSON(f, simplifyVector = TRUE)
+    data.frame(Параметр = c("Кути нахилу, що перебираються", "Кут для меж епідемії в контрольних сезонах", "Найбільше сезонів у розрахунку", "Межа падіння порогу на кроці кута",
+                            "Ваги хибного сигналу і тижня запізнення"),
+               Значення = c(paste0("від ", c$angle$min, " до ", c$angle$max, " з кроком ", c$angle$step), c$angle$truth_angle, c$season$max_seasons,
+                            paste0(round(100 * c$angle$stability_drop), "%"), paste(c$angle$weights$false_alert, c$angle$weights$delay, sep = " : ")), check.names = FALSE)
   }, striped = TRUE, bordered = TRUE)
+
+  # ----- налаштування
+  terr_ids <- reactive({
+    rv$tick
+    tf <- file.path(proj_dir(P()), "territories.csv")
+    if (!file.exists(tf)) return(setNames(character(0), character(0)))
+    t <- read.csv(tf, stringsAsFactors = FALSE, encoding = "UTF-8", check.names = FALSE)
+    setNames(t[[1]], t$name)
+  })
+  data_seasons <- reactive({
+    rv$tick
+    s <- all_seasons(file.path(proj_dir(P()), "datasets"))
+    s[!vapply(s, season_running, logical(1))]
+  })
+  observeEvent(list(input$project, rv$tick), {
+    cfg <- read_cfg(P()); ss <- cfg$season_selection; seas <- data_seasons(); ids <- terr_ids()
+    era <- if (is.null(ss$era_start)) "2023/2024" else ss$era_start
+    updateSelectInput(session, "era_start", choices = unique(c(seas, era)), selected = era)
+    updateCheckboxInput(session, "era_first_not_ctl", value = era %in% unlist(ss$not_validation))
+    updateSelectInput(session, "ex_season", choices = setdiff(seas, names(AUTO_EXCLUDE)))
+    updateSelectInput(session, "ex_terr", choices = c("усі території" = "", setNames(unname(ids), names(ids))))
+    updateNumericInput(session, "workers", value = if (is.null(cfg$parallel$workers)) 2 else cfg$parallel$workers)
+    updateTextAreaInput(session, "emails", value = paste(unlist(cfg$notifications$emails), collapse = "\n"))
+    ex <- list()
+    for (s in names(cfg$exclude_seasons)) ex[[length(ex) + 1]] <- data.frame(Сезон = s, Територія = "усі території", Код = "", Причина = cfg$exclude_seasons[[s]])
+    for (id in names(cfg$exclude_territory_seasons)) for (s in names(cfg$exclude_territory_seasons[[id]]))
+      ex[[length(ex) + 1]] <- data.frame(Сезон = s, Територія = if (id %in% ids) names(ids)[ids == id][1] else id, Код = id, Причина = cfg$exclude_territory_seasons[[id]][[s]])
+    rv$ex <- if (length(ex)) do.call(rbind, ex) else data.frame(Сезон = character(0), Територія = character(0), Код = character(0), Причина = character(0))
+  }, ignoreInit = FALSE)
+  output$auto_excl <- renderTable(data.frame(Сезон = names(AUTO_EXCLUDE), Причина = unname(AUTO_EXCLUDE)), striped = TRUE, bordered = TRUE)
+  output$ex_table <- renderDT({
+    req(rv$ex)
+    datatable(rv$ex[, c("Сезон", "Територія", "Причина")], rownames = FALSE, selection = "single",
+              options = list(dom = "t", language = list(emptyTable = "Виключень немає")))
+  })
+  observeEvent(input$ex_add, {
+    if (!nzchar(trimws(input$ex_reason))) { showNotification("Вкажіть причину виключення.", type = "warning"); return() }
+    if (!nzchar(input$ex_season)) return()
+    ids <- terr_ids(); code <- input$ex_terr
+    who <- if (nzchar(code)) names(ids)[ids == code][1] else "усі території"
+    ex <- rv$ex[!(rv$ex$Сезон == input$ex_season & rv$ex$Код == code), ]
+    rv$ex <- rbind(ex, data.frame(Сезон = input$ex_season, Територія = who, Код = code, Причина = trimws(input$ex_reason)))
+    updateTextInput(session, "ex_reason", value = "")
+  })
+  observeEvent(input$ex_del, {
+    i <- input$ex_table_rows_selected
+    if (length(i)) rv$ex <- rv$ex[-i, ] else showNotification("Позначте рядок у таблиці виключень.", type = "warning")
+  })
+  observeEvent(input$save_settings, {
+    em <- trimws(unlist(strsplit(input$emails, "[\n,;]+"))); em <- em[nzchar(em)]
+    bad <- em[!grepl("^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$", em)]
+    if (length(bad)) { showNotification(paste("Неправильна адреса:", paste(bad, collapse = ", ")), type = "error"); return() }
+    w <- input$workers
+    if (is.na(w) || w < 1) { showNotification("Кількість ядер має бути не менше 1.", type = "error"); return() }
+    cfg <- read_cfg(P())
+    cfg$season_selection$era_start <- input$era_start
+    cfg$season_selection$not_validation <- if (isTRUE(input$era_first_not_ctl)) list(input$era_start) else list()
+    all_ex <- rv$ex[rv$ex$Код == "", ]; one_ex <- rv$ex[rv$ex$Код != "", ]
+    cfg$exclude_seasons <- if (nrow(all_ex)) setNames(as.list(all_ex$Причина), all_ex$Сезон) else setNames(list(), character(0))
+    cfg$exclude_territory_seasons <- setNames(list(), character(0))
+    for (id in unique(one_ex$Код)) { r <- one_ex[one_ex$Код == id, ]; cfg$exclude_territory_seasons[[id]] <- setNames(as.list(r$Причина), r$Сезон) }
+    cfg$parallel$workers <- as.integer(min(w, parallel::detectCores()))
+    cfg$notifications$emails <- as.list(em)
+    write_cfg(P(), cfg)
+    rv$settings_saved <- format(Sys.time(), "%H:%M")
+  })
+  output$settings_saved <- renderUI({
+    if (is.null(rv$settings_saved)) return(NULL)
+    tags$p(class = "text-success", style = "margin-top:10px", sprintf("Збережено о %s. Нові налаштування подіють під час наступного розрахунку порогів.", rv$settings_saved))
+  })
 
   session$onSessionEnded(function() { j <- isolate(rv$job); if (!is.null(j) && j$is_alive()) j$kill() })
 }
