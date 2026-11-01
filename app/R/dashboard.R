@@ -74,14 +74,14 @@ dashboard_server <- function(input, output, session, P, rv) {
   })
   output$etl_compare <- renderDT({
     rv$tick; d <- trimws(input$etl_dir); proj <- proj_dir(P())
-    if (!file.exists(file.path(proj, "output", "memopt_thresholds.csv"))) return(datatable(data.frame(Повідомлення = "Спершу розрахуйте пороги."), rownames = FALSE, options = list(dom = "t")))
+    if (!file.exists(file.path(proj, "output", "memopt_thresholds.csv"))) return(datatable(data.frame(Повідомлення = "Спершу розрахуйте пороги."), rownames = FALSE, options = list(dom = "t", language = lang())))
     new <- dim_thresholds(proj)
     cur <- if (etl_ok(d) && file.exists(file.path(d, "input", "Dim_Thresholds.xlsx"))) as.data.frame(readxl::read_excel(file.path(d, "input", "Dim_Thresholds.xlsx"))) else NULL
     v <- data.frame(Територія = new$Name_in_Dataset, `Епідемічний зараз` = if (is.null(cur)) NA else cur$Base_Threshold[match(new$PCODE, cur$PCODE)],
                     `Епідемічний новий` = new$Base_Threshold, `Середній зараз` = if (is.null(cur)) NA else cur$Medium_Threshold[match(new$PCODE, cur$PCODE)],
                     `Середній новий` = new$Medium_Threshold, check.names = FALSE)
     v$`Зміна епідемічного, %` <- round(100 * (v$`Епідемічний новий` / v$`Епідемічний зараз` - 1), 1)
-    datatable(v, rownames = FALSE, options = list(pageLength = 15, language = list(search = "Пошук:"))) |>
+    datatable(v, rownames = FALSE, options = list(pageLength = 15, language = lang())) |>
       formatRound(2:5, digits = 1, dec.mark = ",", mark = " ") |>
       formatStyle("Зміна епідемічного, %", color = styleInterval(c(-0.05, 0.05), c("#0076BE", "#5b6573", "#B83227")))
   })

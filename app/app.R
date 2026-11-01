@@ -11,6 +11,14 @@ suppressPackageStartupMessages({
   library(shiny); library(bslib); library(DT); library(jsonlite)
 })
 
+# Підписи таблиць українською: DT бере глобальні налаштування лише тоді, коли в таблиці не задано власних,
+# тому кожна таблиця передає language = lang(...), де можна змінити окремі підписи.
+DT_UK <- list(search = "Пошук:", lengthMenu = "Показати _MENU_ рядків", info = "Рядки _START_-_END_ з _TOTAL_",
+              infoEmpty = "Рядків немає", infoFiltered = "(відібрано з _MAX_)", zeroRecords = "Нічого не знайдено",
+              emptyTable = "Даних немає", loadingRecords = "Завантаження", processing = "Обробка",
+              paginate = list(first = "Перша", previous = "Назад", `next` = "Далі", last = "Остання"))
+lang <- function(...) modifyList(DT_UK, list(...))
+
 dataset_table <- function(p) {
   f <- dataset_files(file.path(proj_dir(p), "datasets"))
   if (!length(f)) return(data.frame(Файл = character(0), Аркушів = integer(0), Аркуші = character(0), Змінено = character(0)))
@@ -58,11 +66,14 @@ theme <- bs_theme(version = 5, primary = "#17345E", secondary = "#0076be", base_
 note <- function(...) tags$p(class = "muted", ...)
 
 ui <- page_navbar(
-  title = "memopt: пороги MEM", theme = theme, id = "tabs",
+  # fillable = FALSE: вкладки мають звичайну висоту і прокручуються, а не стискаються до висоти вікна
+  # (інакше вміст карток накладається один на одний)
+  title = "memopt: пороги MEM", theme = theme, id = "tabs", fillable = FALSE,
   header = tags$head(tags$style(HTML("
     .log-box { background:#0f1b2d; color:#dfe7f2; font-family:Consolas,monospace; font-size:12.5px; height:420px; overflow-y:auto; white-space:pre-wrap; padding:12px; border-radius:8px; }
     .muted { color:#5b6573; }
-    .rule-num { font-size:28px; font-weight:700; color:#17345E; }"))),
+    .rule-num { font-size:28px; font-weight:700; color:#17345E; }
+    .progress { height:24px; font-size:13px; margin:8px 0; }"))),
   nav_panel("Проєкт",
     layout_columns(col_widths = c(4, 8),
       card(card_header("Проєкт області"),
@@ -81,14 +92,19 @@ ui <- page_navbar(
            actionButton("check_data", "Перевірити дані", class = "btn-outline-primary")),
       card(card_header("Файли проєкту"), DTOutput("datasets")))),
   nav_panel("Перевірка даних",
-    card(card_header("Результат перевірки"), uiOutput("data_check_summary"), DTOutput("data_check"))),
+    card(card_header("Помилки у файлах"), uiOutput("data_check_summary"), DTOutput("data_check")),
+    card(card_header("Що варто переглянути в даних (з останнього розрахунку)"),
+         note("Під час розрахунку програма переглядає кожен сезон кожної території і позначає ті, що помітно відрізняються від звичних: багато нульових чи пропущених тижнів або пік, утричі вищий чи нижчий за звичайний для цієї території. Це не помилки, такі сезони беруться в розрахунок. Але варто перевірити, чи правильно внесені дані: якщо сезон справді зіпсований, його можна виключити на вкладці «Налаштування»."),
+         uiOutput("flags_summary"), DTOutput("flags"))),
   nav_panel("Території",
     layout_columns(col_widths = c(4, 8),
       card(card_header("Як заповнити"),
            note("Перелік складено з назв аркушів. Тип території вгадано з назви; виправте його, якщо треба: двічі клацніть клітинку, впишіть значення і натисніть Enter."),
            tags$p(tags$b("Типи: "), paste(TYPES, collapse = ", "), "."),
            note("Для кожної громади вкажіть район (так само, як він записаний у колонці «Назва») і населення. Еталон громади визначається сам: міська громада спирається на весь район, сільська і селищна на район без центру, а якщо його немає, на весь район."),
-           fileInput("upload_pop", "Населення громад з файлу (Excel або CSV: назва, населення, за бажання район)", accept = c(".xlsx", ".csv"), buttonLabel = "Обрати", placeholder = "файл не обрано"),
+           tags$h6("Населення громад"),
+           note("Населення можна вписати в таблицю вручну, а можна завантажити одним файлом. Файл Excel або CSV має містити колонку з назвами громад і колонку з населенням; можна додати й колонку з районом, якщо в області є громади з однаковими назвами. Програма знайде громади за назвою і впише населення в перелік; назви, яких не знайде, покаже нижче."),
+           fileInput("upload_pop", "Завантажити файл з населенням громад", accept = c(".xlsx", ".csv"), buttonLabel = "Обрати", placeholder = "файл не обрано"),
            uiOutput("pop_unmatched"),
            note("Якщо населення громад після 2022 року помітно змінилось через міграцію, а знаменник лишився старим, пороги таких громад можуть працювати гірше."),
            actionButton("save_terr", "Зберегти перелік", class = "btn-primary")),
@@ -144,8 +160,8 @@ ui <- page_navbar(
            numericInput("workers", "Скільки ядер процесора використовувати", value = 2, min = 1, max = parallel::detectCores(), step = 1),
            note(sprintf("На цьому комп'ютері %d ядер. Що більше ядер, то швидше розрахунок, але комп'ютер під час нього працює повільніше. На слабкому комп'ютері поставте 2.", parallel::detectCores())),
            tags$hr(),
-           tags$h6("Сповіщення"),
-           note("Повідомлення надходять, коли пороги перераховано за розкладом або коли розрахунок за розкладом зупинився з помилкою."),
+           tags$h6("Сповіщення про перерахунок порогів"),
+           note("Застосунок може сам перераховувати пороги раз на тиждень за розкладом (налаштовується нижче) і повідомляти про це. Повідомлення надходить у двох випадках: пороги перераховано, бо в даних з'явився новий завершений сезон, і тоді в листі нові пороги; або розрахунок за розкладом не вдався, і тоді в листі причина. Отримувачами зазвичай є епідеміолог, який відповідає за пороги, і керівник відділу. Якщо розклад не вмикати, сповіщення не потрібні: виберіть «Не надсилати»."),
            radioButtons("n_method", NULL, c("Не надсилати" = "none", "Пошта" = "email", "Telegram" = "telegram", "Пошта і Telegram" = "both"), inline = TRUE),
            conditionalPanel("input.n_method == 'email' || input.n_method == 'both'",
              textAreaInput("emails", "Адреси отримувачів (кожна з нового рядка)", rows = 3, placeholder = "epid@cgz.example.ua"),
@@ -195,7 +211,15 @@ server <- function(input, output, session) {
   })
 
   P <- reactive({ req(input$project); input$project })
-  refresh <- reactive({ rv$tick; input$project; invalidateLater(5000); TRUE })
+  # таблиці перемальовуються лише тоді, коли змінились файли проєкту (дані, перелік, налаштування, результати),
+  # а не за таймером: інакше прокрутка щоразу стрибає вгору
+  files_state <- reactivePoll(3000, session, checkFunc = function() {
+    p <- isolate(input$project); if (is.null(p) || !nzchar(p)) return("")
+    d <- proj_dir(p)
+    f <- c(list.files(file.path(d, "datasets"), full.names = TRUE), file.path(d, c("territories.csv", "config.json", "output/memopt_thresholds.csv")))
+    paste(f, file.mtime(f), collapse = "|")
+  }, valueFunc = function() Sys.time())
+  refresh <- reactive({ rv$tick; input$project; files_state(); TRUE })
 
   # перевірка даних і перелік територій перебудовуються при зміні проєкту, завантаженні або на вимогу
   run_checks <- function() {
@@ -224,7 +248,7 @@ server <- function(input, output, session) {
     showNotification(paste("Збережено", sum(ok), plur(sum(ok), "файл", "файли", "файлів"), "; дані перевірено"), type = "message")
     run_checks()
   })
-  output$datasets <- renderDT({ refresh(); datatable(dataset_table(P()), rownames = FALSE, options = list(dom = "t", pageLength = 50, language = list(emptyTable = "Файлів ще немає"))) })
+  output$datasets <- renderDT({ refresh(); datatable(dataset_table(P()), rownames = FALSE, options = list(dom = "t", pageLength = 50, language = lang(emptyTable = "Файлів ще немає"))) })
 
   output$data_check_summary <- renderUI({
     x <- rv$data_chk
@@ -237,8 +261,32 @@ server <- function(input, output, session) {
   })
   output$data_check <- renderDT({
     x <- rv$data_chk; if (is.null(x) || !nrow(x)) x <- data.frame(Повідомлення = "Помилок немає")
-    datatable(x, rownames = FALSE, filter = "top", options = list(pageLength = 25, language = list(search = "Пошук:", emptyTable = "Помилок немає"))) |>
+    datatable(x, rownames = FALSE, options = list(pageLength = 25, language = lang(emptyTable = "Помилок немає"))) |>
       (\(d) if ("Рівень" %in% names(x)) formatStyle(d, "Рівень", color = styleEqual(c("помилка", "увага", "довідка"), c("#B83227", "#9A6700", "#5b6573")), fontWeight = "bold") else d)()
+  })
+
+  # зауваження з останнього розрахунку (аркуш «Перевірка даних» книги результатів)
+  flags <- reactive({
+    refresh()
+    f <- file.path(proj_dir(P()), "output", "memopt_results.xlsx")
+    if (!file.exists(f)) return(NULL)
+    x <- tryCatch(as.data.frame(readxl::read_excel(f, sheet = "Перевірка даних")), error = function(e) NULL)
+    if (is.null(x) || !"Примітка" %in% names(x)) return(NULL)
+    x[!is.na(x$Примітка) & nzchar(x$Примітка) & x$Примітка != "сезон відсікається автоматично", , drop = FALSE]
+  })
+  output$flags_summary <- renderUI({
+    x <- flags()
+    if (is.null(x)) return(note("Зауваження з'являться після першого розрахунку на вкладці «Розрахунок»."))
+    if (!nrow(x)) return(tags$p(class = "text-success", tags$b("Сезонів, які варто переглянути, немає.")))
+    tags$p(tags$b(sprintf("%d %s, які варто переглянути.", nrow(x), plur(nrow(x), "сезон", "сезони", "сезонів"))))
+  })
+  output$flags <- renderDT({
+    x <- flags(); req(x, nrow(x))
+    v <- data.frame(Територія = x$Назва, Сезон = x$Сезон, `Що помічено` = x$Примітка,
+                    `Нульових тижнів` = x$`Нульових тижнів`, `Пропущених тижнів` = x$`Пропущено тижнів усередині сезону`,
+                    `Пік порівняно зі звичним, разів` = round(x$`Пік до звичного піку`, 2), check.names = FALSE)
+    datatable(v, rownames = FALSE, options = list(pageLength = 25, language = lang())) |>
+      formatRound("Пік порівняно зі звичним, разів", digits = 2, dec.mark = ",")
   })
 
   # ----- території
@@ -247,7 +295,7 @@ server <- function(input, output, session) {
     req(rv$tb)
     datatable(rv$tb[, show_cols], rownames = FALSE, selection = "none",
               editable = list(target = "cell", disable = list(columns = c(4, 5, 6))),
-              options = list(pageLength = 25, language = list(search = "Пошук:", emptyTable = "Аркушів немає: завантажте дані")))
+              options = list(pageLength = 25, language = lang(search = "Пошук:", emptyTable = "Аркушів немає: завантажте дані")))
   })
   observeEvent(input$terr_table_cell_edit, {
     e <- input$terr_table_cell_edit
@@ -269,7 +317,7 @@ server <- function(input, output, session) {
   })
   output$terr_check <- renderDT({
     x <- terr_chk(); if (is.null(x)) x <- data.frame(Повідомлення = "Помилок немає")
-    datatable(x, rownames = FALSE, options = list(dom = "tp", pageLength = 10, language = list(emptyTable = "Помилок немає")))
+    datatable(x, rownames = FALSE, options = list(dom = "tp", pageLength = 10, language = lang(emptyTable = "Помилок немає")))
   })
   observeEvent(input$save_terr, {
     x <- terr_chk()
@@ -296,12 +344,17 @@ server <- function(input, output, session) {
     rv$job <- callr::r_bg(function(core, cfg) { assign("MO_CORE", core, envir = .GlobalEnv); source(core, encoding = "UTF-8"); invisible(mo_run(cfg)) },
                           args = list(core = CORE, cfg = file.path(proj_dir(P()), "config.json")),
                           stdout = logf, stderr = "2>&1", supervise = TRUE)
-    rv$msg <- NULL
+    rv$msg <- NULL; rv$started <- Sys.time()
   })
+  dur_file <- function() file.path(proj_dir(P()), "output", "тривалість_розрахунку.txt")
   observe({
     invalidateLater(1000)
     j <- rv$job
-    if (!is.null(j) && !j$is_alive() && is.null(rv$msg)) { rv$msg <- if (j$get_exit_status() == 0) "done" else "error"; rv$tick <- rv$tick + 1 }
+    if (!is.null(j) && !j$is_alive() && is.null(rv$msg)) {
+      rv$msg <- if (j$get_exit_status() == 0) "done" else "error"; rv$tick <- rv$tick + 1
+      # тривалість успішного розрахунку запам'ятовується, щоб наступного разу показати, скільки приблизно лишилось
+      if (identical(rv$msg, "done")) writeLines(as.character(round(as.numeric(difftime(Sys.time(), rv$started, units = "secs")))), dur_file())
+    }
   })
   output$log <- renderText({
     invalidateLater(1000)
@@ -312,7 +365,23 @@ server <- function(input, output, session) {
     invalidateLater(1000)
     j <- rv$job
     if (is.null(j)) return(NULL)
-    if (j$is_alive()) return(tags$p(tags$b("Розрахунок іде.")))
+    if (j$is_alive()) {
+      # прогрес: етап з журналу (рядки «1.» ... «6.») і час від запуску порівняно з тривалістю попереднього розрахунку
+      lg <- if (!is.null(rv$log) && file.exists(rv$log)) readLines(rv$log, warn = FALSE, encoding = "UTF-8") else character(0)
+      heads <- grep("^[1-6][.] ", lg, value = TRUE)
+      st <- if (length(heads)) as.integer(substr(tail(heads, 1), 1, 1)) else 1L
+      floor_pct <- c(0, 5, 30, 45, 90, 95)[st]
+      el <- as.numeric(difftime(Sys.time(), rv$started, units = "secs"))
+      prev <- suppressWarnings(as.numeric(tryCatch(readLines(dur_file(), warn = FALSE)[1], error = function(e) NA)))
+      pct <- if (!is.na(prev) && prev > 0) max(floor_pct, min(99, round(100 * el / prev))) else floor_pct
+      mmss <- function(x) sprintf("%d хв %02d с", as.integer(x %/% 60), as.integer(round(x %% 60)))
+      left <- if (!is.na(prev) && prev > el) paste0(", лишилось приблизно ", mmss(prev - el)) else ""
+      return(tagList(
+        tags$p(tags$b(sprintf("Розрахунок іде: етап %d з 6.", st)), " ", if (length(heads)) sub("^[1-6][.] ", "", tail(heads, 1))),
+        tags$div(class = "progress", tags$div(class = "progress-bar progress-bar-striped progress-bar-animated", role = "progressbar",
+                                              style = sprintf("width:%d%%", max(pct, 3)), sprintf("%d%%", pct))),
+        note(paste0("Минуло ", mmss(el), left, ".", if (is.na(prev)) " Після першого розрахунку програма запам'ятає його тривалість і показуватиме, скільки лишилось." else ""))))
+    }
     if (identical(rv$msg, "done")) tags$p(class = "text-success", tags$b("Готово. Результати на вкладках «Результати» і «Правило для малих громад»."))
     else {
       # непередбачена помилка: показати її людською мовою і дати зберегти журнал для розробника
@@ -335,13 +404,11 @@ server <- function(input, output, session) {
   })
   output$thresholds <- renderDT({
     t <- thr()
-    if (is.null(t)) return(datatable(data.frame(Повідомлення = "Результатів ще немає: запустіть розрахунок."), rownames = FALSE, options = list(dom = "t")))
+    if (is.null(t)) return(datatable(data.frame(Повідомлення = "Результатів ще немає: запустіть розрахунок."), rownames = FALSE, options = list(dom = "t", language = lang())))
     if (input$res_kind != "all") t <- t[t$kind == input$res_kind, ]
     v <- data.frame(Територія = t$name, Вид = t$kind, `Сезони в розрахунку` = t$seasons_used, Кут = t$angle_txt,
                     Епідемічний = t$base, Середній = t$medium, Високий = t$high, `Дуже високий` = t$veryhigh, check.names = FALSE)
-    datatable(v, rownames = FALSE, filter = "top",
-              options = list(pageLength = 25, language = list(search = "Пошук:", lengthMenu = "Показати _MENU_", info = "_START_ до _END_ з _TOTAL_",
-                                                              paginate = list(previous = "Назад", `next` = "Далі")))) |>
+    datatable(v, rownames = FALSE, options = list(pageLength = 25, language = lang())) |>
       formatRound(c("Епідемічний", "Середній", "Високий", "Дуже високий"), digits = 1, dec.mark = ",", mark = " ")
   })
   output$dl_xlsx <- downloadHandler(filename = function() paste0("memopt_результати_", P(), ".xlsx"),
@@ -379,7 +446,7 @@ server <- function(input, output, session) {
                     `Середній поріг, випадків на тиждень` = round(rt$cases, 1),
                     Правило = ifelse(rt$by_rule, "так, за порогом надійності", ifelse(rt$manual, "так, додано вручну", "ні")), check.names = FALSE)
     datatable(v[order(v$Правило == "ні", v$`Середній поріг, випадків на тиждень`), ], rownames = FALSE,
-              options = list(pageLength = 15, language = list(search = "Пошук:"))) |>
+              options = list(pageLength = 15, language = lang(search = "Пошук:"))) |>
       formatStyle("Правило", color = styleEqual(c("ні"), c("#5b6573"), default = "#17345E"), fontWeight = "bold")
   })
   output$rule_sens <- renderTable({
@@ -453,7 +520,7 @@ server <- function(input, output, session) {
   output$ex_table <- renderDT({
     req(rv$ex)
     datatable(rv$ex[, c("Сезон", "Територія", "Причина")], rownames = FALSE, selection = "single",
-              options = list(dom = "t", language = list(emptyTable = "Виключень немає")))
+              options = list(dom = "t", language = lang(emptyTable = "Виключень немає")))
   })
   observeEvent(input$ex_add, {
     if (!nzchar(trimws(input$ex_reason))) { showNotification("Вкажіть причину виключення.", type = "warning"); return() }

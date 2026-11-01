@@ -635,7 +635,7 @@ mo_small_areas <- function(cfg, terr, ser, tabs, log) {
   preps <- lapply(seq_len(nrow(hs)), function(i) mo_hrom_prep(hs[i, ], ser, cfg, terr))
   tier <- vapply(preps, function(p) mo_tier(p$med_cases, cfg), character(1))
   ang_map <- setNames(tabs$angle, tabs$id)
-  cat("  3.1 кут за групами малих територій\n"); flush.console()
+  cat("  Підбір кута нахилу для груп громад за кількістю випадків\n"); flush.console()
   scans <- mo_pmap(preps, mo_hrom_angle_scan, cfg)
   sc <- do.call(rbind, Map(function(s, tr) if (is.null(s)) NULL else data.frame(s, tier = tr), scans, tier))
   sc$loss <- cfg$angle$weights$false_alert * sc$fa + cfg$angle$weights$delay * sc$delay
@@ -652,16 +652,23 @@ mo_small_areas <- function(cfg, terr, ser, tabs, log) {
   }
   group_scan <- do.call(rbind, group_scan)
   group_scan$chosen <- mapply(function(t, a) a == angle_by_tier[[t]], group_scan$tier, group_scan$angle)
-  cat("  кути за групами:", paste(names(angle_by_tier), angle_by_tier, sep = " = ", collapse = "; "), "\n"); flush.console()
+  g <- cfg$small_areas$groups
+  tier_txt <- c("надійні дані" = sprintf("з надійними даними (у середньому %s і більше випадків на тиждень", g$reliable_min),
+                "обмежені дані" = sprintf("з обмеженими даними (від %s до %s випадків", g$limited_min, g$reliable_min),
+                "ненадійні дані" = sprintf("з ненадійними даними (менше %s випадків", g$limited_min))
+  ord <- intersect(names(tier_txt), names(angle_by_tier))
+  cat(paste0("  Кут нахилу для громад ", paste0(tier_txt[ord], ", громад: ", vapply(ord, function(t) sum(tier == t), integer(1)), "): ",
+                                                 gsub(".", ",", as.character(angle_by_tier[ord]), fixed = TRUE), collapse = "; "), "\n")); flush.console()
 
-  cat("  3.2 пороги всіх способів і перевірка на відкладеному сезоні\n"); flush.console()
+  cat("  Розрахунок порогів громад і перевірка на сезоні, відкладеному для контролю\n"); flush.console()
   # Кут власного порогу кожної громади: не вище кута групи і такий, при якому епідемічний поріг нижчий за середній
   # (та сама умова допустимості, що для основних територій). Якщо такого кута немає, власний поріг непридатний (вага 0).
   rule <- isTRUE(cfg$small_areas$angle_rule == "base_below_medium")
   own_angle <- mapply(function(p, tr) if (rule) mo_pick_angle_below(p$d, angle_by_tier[[tr]], cfg) else angle_by_tier[[tr]], preps, tier)
   usable <- !is.na(own_angle)
   own_angle_run <- ifelse(usable, own_angle, angle_by_tier[tier])
-  cat("  кут за умовою: знижено для", sum(usable & abs(own_angle_run - angle_by_tier[tier]) > 1e-9), "громад, власний поріг непридатний у", sum(!usable), "\n"); flush.console()
+  cat(sprintf("  Для %d громад кут зменшено, щоб епідемічний поріг лишався нижчим за середній. У %d громад власні дані не дають придатного порогу, тому їхні пороги спираються на еталон (район або район без центру).\n",
+              sum(usable & abs(own_angle_run - angle_by_tier[tier]) > 1e-9), sum(!usable))); flush.console()
   jobs <- Map(function(p, a) list(p = p, own_angle = a, ref_angle = ang_map[[p$refid]]), preps, own_angle_run)
   res <- mo_pmap(jobs, mo_hrom_job, cfg)
 
@@ -887,29 +894,35 @@ mo_run <- function(cfg_path) {
   if (length(auto)) cat("  Увага: сезони", paste0(auto, " (", MO_AUTO_EXCLUDE[auto], ")", collapse = ", "), "відсічено автоматично, вони не придатні для порогів\n")
   checks <- mo_check_inputs(cfg, terr)
   nflag <- sum(nzchar(checks$note) & !grepl("^сезон відсікається автоматично$", checks$note))
-  if (nflag) cat("  Перевірка даних: позначено", nflag, "пар територія і сезон, див. аркуш", paste0("«", MO_SHEETS$input_check, "»\n"))
+  if (nflag) cat(sprintf("  У даних є сезони, які варто переглянути: %d. Перелік на вкладці «Перевірка даних» і в книзі результатів, аркуш «%s».\n", nflag, MO_SHEETS$input_check))
   cfg$.season_sets <- NULL
   ser <- list()
   for (i in seq_len(nrow(terr))) ser[[terr$id[i]]] <- mo_series(terr[i, ], cfg, log, all_seasons = TRUE)
   cens <- if (length(log$rows)) do.call(rbind, log$rows) else data.frame()
 
   series_terr <- terr[terr$kind == "main", ]
-  cat("1а. Добір сезонів основних територій\n"); flush.console()
+  cat("2. Вибір сезонів для області, районів і міст\n")
+  cat("  Для кожної території програма порівнює набори з кількох останніх сезонів і бере той, з яким пороги найточніше відділяють епідемію від спокійних тижнів у сезонах, відкладених для перевірки.\n"); flush.console()
   sel <- mo_pmap(lapply(series_terr$id, function(id) ser[[id]]), mo_select_seasons, cfg)
   names(sel) <- series_terr$id
   season_pick <- do.call(rbind, lapply(seq_along(sel), function(i) data.frame(id = series_terr$id[i], name = series_terr$name[i], sel[[i]]$table, row.names = NULL)))
   sets <- list()
   for (id in series_terr$id) {
     ser[[id]] <- ser[[id]][, sel[[id]]$seasons, drop = FALSE]; sets[[id]] <- sel[[id]]$seasons
-    cat("  ", series_terr$name[match(id, series_terr$id)], ":", length(sel[[id]]$seasons), "з", sel[[id]]$table$n_available[1], "сезонів (", sel[[id]]$note, ")\n")
+    k <- length(sel[[id]]$seasons)
+    cat(sprintf("   %s: %d %s з %d наявних (%s)%s\n", series_terr$name[match(id, series_terr$id)], k,
+                if (k %% 10 == 1 && k %% 100 != 11) "сезон" else if (k %% 10 %in% 2:4 && !(k %% 100 %in% 12:14)) "сезони" else "сезонів",
+                sel[[id]]$table$n_available[1], paste(sel[[id]]$seasons, collapse = ", "),
+                if (grepl("^найменша сумарна помилка", sel[[id]]$note)) "" else paste0("; ", sel[[id]]$note)))
   }
   nera <- sum(unique(unlist(lapply(ser, names))) >= cfg$season_selection$era_start)
-  if (nera < cfg$season_selection$era_full) cat("  Увага: сезонів від", cfg$season_selection$era_start, "лише", nera, "; пороги громад, що мають дані лише за ці сезони, менш надійні, ніж на", cfg$season_selection$era_full, "і більше сезонах\n")
+  if (nera < cfg$season_selection$era_full) cat(sprintf("  Увага: сезонів від %s лише %d. Пороги громад, які мають дані тільки за ці сезони, менш надійні, ніж були б на %d і більше сезонах.\n", cfg$season_selection$era_start, nera, cfg$season_selection$era_full))
   cfg$.season_sets <- sets
   cfg$.truth <- lapply(sel, `[[`, "truth_angle")
   writeLines(jsonlite::toJSON(sets, auto_unbox = FALSE, pretty = TRUE), file.path(out_dir, "season_sets.json"), useBytes = TRUE)
 
-  cat("2. Основні території: кут, пороги, вплив сезонів, стабільність\n"); flush.console()
+  cat("3. Пороги області, районів і міст\n")
+  cat("  Кут нахилу визначає, де в минулих сезонах починалась і закінчувалась епідемія; від цього залежать пороги. Програма підбирає його для кожної території.\n"); flush.console()
   items <- lapply(seq_len(nrow(series_terr)), function(i) list(row = series_terr[i, ], d = ser[[series_terr$id[i]]], eval_seasons = sel[[series_terr$id[i]]]$eval_seasons,
                                                          truth_angle = sel[[series_terr$id[i]]]$truth_angle, noepi = sel[[series_terr$id[i]]]$noepi))
   tr <- mo_pmap(items, mo_territory, cfg)
@@ -918,17 +931,17 @@ mo_run <- function(cfg_path) {
   infl <- do.call(rbind, lapply(tr, `[[`, "infl"))
   stab <- do.call(rbind, Filter(Negate(is.null), lapply(tr, `[[`, "stab")))
   floors <- data.frame(id = tabs$id, name = tabs$name, floor = vapply(tr, `[[`, numeric(1), "floor"), angle = tabs$angle)
-  for (i in seq_len(nrow(tabs))) cat("  ", tabs$name[i], "кут", tabs$angle[i], "\n")
+  for (i in seq_len(nrow(tabs))) cat(sprintf("   %s: кут нахилу %s\n", tabs$name[i], format(tabs$angle[i], decimal.mark = ",")))
 
   hr <- NULL; prop <- NULL
   if (has_small) {
-    cat("3. Малі території\n"); flush.console()
+    cat("4. Пороги громад\n"); flush.console()
     hr <- mo_small_areas(cfg, terr, ser, tabs, log)
     if (isTRUE(cfg$diagnostics$proportionality)) prop <- mo_proportionality(cfg, terr, ser)
   }
   mw <- NULL
   if (isTRUE(cfg$diagnostics$multiple_waves)) {
-    cat("4. Діагностика: багато хвиль\n"); flush.console()
+    cat("5. Додаткова перевірка: сезони з кількома хвилями\n"); flush.console()
     mwitems <- lapply(seq_len(nrow(series_terr)), function(i) list(id = series_terr$id[i], name = series_terr$name[i], level = series_terr$level[i],
                                                                    d = ser[[series_terr$id[i]]], angle = tabs$angle[i]))
     if (has_small) {
@@ -939,7 +952,7 @@ mo_run <- function(cfg_path) {
     mw <- do.call(rbind, mo_pmap(mwitems, mo_multiwave_one, cfg))
   }
 
-  cat("5. Запис результатів\n"); flush.console()
+  cat("6. Запис результатів\n"); flush.console()
   holdsum <- NULL
   if (has_small && !is.null(hr$holdout)) {
     h <- hr$holdout
@@ -1043,6 +1056,6 @@ mo_run <- function(cfg_path) {
   saveWorkbook(wb, f, overwrite = TRUE)
   saveRDS(list(tabs = tabs, hr = hr, prop = prop, mw = mw, scans = scans, floors = floors, thr = thr_all, season_pick = season_pick, season_sets = sets), file.path(out_dir, "last_run.rds"))
   mo_export_filled(cfg, terr, file.path(out_dir, "reference_series_filled.csv"))
-  cat("Готово:", f, "\n")
+  cat("Готово. Книга результатів:", f, "\n")
   invisible(list(cfg = cfg, tabs = tabs, hromadas = hr, thr = thr_all))
 }
