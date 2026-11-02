@@ -1,10 +1,10 @@
 # memopt: застосунок shiny для розрахунку порогів MEM.
 # Етап 1: проєкти областей, завантаження даних, розрахунок у фоні з журналом, результати.
 # Етап 2: перевірка даних з точним місцем і порадою, перелік територій з назв аркушів, населення громад,
-# правило підтвердження районом (кандидати за порогом статистичної надійності, чутливість, ручне додавання з причиною).
-# Етап 3: налаштування (перший сезон нинішнього періоду, виключення сезонів з причиною, ядра, адреси для сповіщень).
+# громади з малою кількістю випадків (за межею надійності, чутливість, ручне додавання з причиною).
+# Етап 3: налаштування (перший сезон, який завжди йде в розрахунок, виключення сезонів з причиною, ядра).
 # Етап 4: вкладка «Дашборд» для Сумської області (app/R/dashboard.R): передача порогів в ETL з архівом і запуск ETL.
-# Етап 5: сповіщення поштою і в Telegram, щотижневий розклад (app/R/notify.R, run_scheduled.R).
+# Етап 5: сповіщення поштою і в Telegram, щотижневий розклад (app/R/notify.R, notify_ui.R, run_scheduled.R; лише в нашій інсталяції).
 # Запуск: файл "Запустити_memopt.bat" або Rscript -e "shiny::runApp('app', launch.browser = TRUE)".
 # Допоміжні функції в app/R (shiny підключає їх сам): project.R, data_checks.R, territories.R, dashboard.R.
 suppressPackageStartupMessages({
@@ -46,7 +46,7 @@ project_status <- function(p, data_chk, terr_chk) {
     check.names = FALSE)
 }
 
-# Правило підтвердження районом: середній поріг громади в кількості випадків на тиждень
+# Громади з малою кількістю випадків: середній поріг громади в кількості випадків на тиждень
 rule_table <- function(p) {
   d <- proj_dir(p)
   f <- file.path(d, "output", "memopt_thresholds.csv"); tf <- file.path(d, "territories.csv")
@@ -87,7 +87,8 @@ ui <- page_navbar(
     layout_columns(col_widths = c(4, 8),
       card(card_header("Завантаження"),
            fileInput("upload_xlsx", "Ряди захворюваності (Excel, можна кілька файлів)", multiple = TRUE, accept = ".xlsx", buttonLabel = "Обрати", placeholder = "файли не обрано"),
-           note("Кожен аркуш це одна територія, і назва аркуша стає назвою території, наприклад «Конотопський район», «Конотопський район без центру», «м. Конотоп», «Буринська міська ТГ». Excel дозволяє в назві аркуша щонайбільше 31 символ: якщо повна назва довша, скоротіть її на аркуші, а повну впишіть потім на вкладці «Території». Назви в межах області мають бути різними: громади з однаковою назвою розрізніть районом у дужках. Коди адмінодиниць не потрібні."),
+           note("Потрібні ряди області, усіх районів і всіх громад. Дуже бажані ряди районів без районного центру: без них пороги селищних і сільських громад будуть менш точними. Ряди районних центрів додайте, якщо для них потрібні власні пороги."),
+           note("Кожен аркуш це одна територія. Excel дозволяє в назві аркуша не більше 31 символу, тому пишіть назви коротко: «Сумська обл.», «Конотопський р-н», «Конотопський без центру» (район без районного центру), «м. Конотоп», «Буринська МТГ» (міська громада), «Миколаївська СелТГ» (селищна), «Бочечківська СілТГ» (сільська). Програма розпізнає ці скорочення і сама запише повні назви на вкладці «Території»; там же будь-яку назву можна виправити. Назви в межах області мають бути різними: громади з однаковою назвою розрізніть районом у дужках. Коди адмінодиниць не потрібні."),
            note("У першій колонці тижні від 40 до 52, потім від 1 до 20; далі колонка на кожен сезон з назвою 2023/2024; значення це кількість випадків на 100 тис. населення за тиждень, як у memapp."),
            actionButton("check_data", "Перевірити дані", class = "btn-outline-primary")),
       card(card_header("Файли проєкту"), DTOutput("datasets")))),
@@ -99,17 +100,18 @@ ui <- page_navbar(
   nav_panel("Території",
     layout_columns(col_widths = c(4, 8),
       card(card_header("Як заповнити"),
-           note("Перелік складено з назв аркушів. Тип території і вид громади вгадано з назви; виправте їх, якщо треба: двічі клацніть клітинку, впишіть значення і натисніть Enter."),
+           note("Перелік територій складено з назв аркушів. Тип території і вид громади програма визначила за назвою; виправте їх, якщо треба: двічі клацніть клітинку, впишіть значення і натисніть Enter."),
            tags$p(tags$b("Типи: "), paste(TYPES, collapse = ", "), "."),
            tags$p(tags$b("Вид громади: "), paste(HKINDS, collapse = ", "), "."),
-           note("Для кожної громади перевірте вид і вкажіть район (так само, як він записаний у колонці «Назва») і населення. Еталон громади визначається за видом: міська громада спирається на весь район, сільська і селищна на район без центру, а якщо його немає, на весь район."),
+           note("Для кожної громади перевірте вид і вкажіть район (так само, як він записаний у колонці «Назва») і населення."),
+           note("Ряд однієї громади короткий і нерівний, тому поріг лише за ним був би нестійким. Програма розраховує поріг громади з урахуванням даних більшої території, до якої громада належить; таку територію називаємо еталоном. Для міської громади еталон це весь район, для селищної і сільської район без районного центру, бо в місті захворюваність зростає і спадає інакше, ніж у селах. Якщо району без районного центру немає, еталоном буде весь район."),
            tags$h6("Населення громад"),
-           note("Населення можна вписати в таблицю вручну, а можна завантажити одним файлом. У файлі Excel або CSV перша колонка містить назви громад так само, як у переліку, друга населення; у третю можна вписати район, якщо в області є громади з однаковими назвами. Програма знайде громади за назвою і впише населення в перелік; назви, яких не знайде, покаже нижче."),
+           note("Населення потрібне лише для того, щоб перевести середній поріг громади з показника на 100 тис. у кількість випадків на тиждень: так програма знаходить громади, де випадків замало (вкладка «Громади з малою кількістю випадків»). Тому досить одного числа, останнього відомого населення. Показники на 100 тис. у рядах рахуються ще до завантаження в застосунок, і там береться населення відповідного року. Населення можна вписати в таблицю вручну або завантажити одним файлом Excel чи CSV: у першій колонці назва громади так само, як у колонці «Назва» переліку територій, у другій кількість населення. Третя колонка необов'язкова: якщо вписати в неї назву району, до якого належить громада (наприклад «Конотопський район»), програма заповнить і колонку «Район». Назви, яких програма не знайде, з'являться нижче."),
            fileInput("upload_pop", "Завантажити файл з населенням громад", accept = c(".xlsx", ".csv"), buttonLabel = "Обрати", placeholder = "файл не обрано"),
            uiOutput("pop_unmatched"),
            note("Якщо населення громад після 2022 року помітно змінилось через міграцію, а знаменник лишився старим, пороги таких громад можуть працювати гірше."),
-           actionButton("save_terr", "Зберегти перелік", class = "btn-primary")),
-      card(card_header("Перелік територій"), DTOutput("terr_table"), tags$hr(), tags$h6("Перевірка переліку"), DTOutput("terr_check")))),
+           actionButton("save_terr", "Зберегти перелік територій", class = "btn-primary")),
+      card(card_header("Перелік територій"), DTOutput("terr_table"), tags$hr(), tags$h6("Перевірка переліку територій"), DTOutput("terr_check")))),
   nav_panel("Розрахунок",
     layout_columns(col_widths = c(4, 8),
       card(card_header("Запуск"),
@@ -125,25 +127,25 @@ ui <- page_navbar(
            downloadButton("dl_csv", "Таблиця порогів (CSV)"),
            radioButtons("res_kind", NULL, c("Усі території" = "all", "Основні території" = "основна", "Громади" = "мала"), inline = TRUE)),
          DTOutput("thresholds"))),
-  nav_panel("Правило для малих громад",
+  nav_panel("Громади з малою кількістю випадків",
     layout_columns(col_widths = c(4, 8),
-      card(card_header("Правило підтвердження районом"),
-           tags$p("У малій громаді кілька випадків на тиждень можуть випадково підняти рівень. Тому мала громада показує рівень «середній» і вище лише тоді, коли її район уже не нижче свого епідемічного порогу; інакше показується «низький» з позначкою місцевого підвищення."),
-           numericInput("rel_min", "Поріг статистичної надійності, випадків на тиждень", value = RELIABILITY_DEFAULT, min = 1, max = 100, step = 1),
-           note("Громада вважається малою, якщо її середній поріг відповідає меншій кількості випадків на тиждень. Типове значення 20 випадків: показники, що спираються на менш ніж 20 подій, мають відносну похибку 23% і більше (Klein et al., 2002, Healthy People Statistical Notes 24)."),
+      card(card_header("Громади з малою кількістю випадків"),
+           tags$p("У громаді, де за тиждень буває лише кілька випадків, рівень може піднятися випадково. Тому в таких громадах середній і вищі рівні показуються лише тоді, коли захворюваність у районі без районного центру (а якщо його немає, у всьому районі) перевищила свій епідемічний поріг. До того громада показує низький рівень з приміткою про місцеве підвищення."),
+           numericInput("rel_min", "Випадків на тиждень замало, якщо їх менше ніж", value = RELIABILITY_DEFAULT, min = 1, max = 100, step = 1),
+           note("Програма переводить середній поріг громади у кількість випадків на тиждень і позначає громади, де ця кількість менша за вказану. Типове значення 20 випадків: показники, що спираються на менш ніж 20 випадків, мають відносну похибку 23% і більше (Klein et al., 2002, Healthy People Statistical Notes 24)."),
            selectizeInput("rule_manual", "Додати громади вручну", choices = NULL, multiple = TRUE, options = list(placeholder = "оберіть громади")),
            textInput("rule_reason", "Причина ручного додавання", placeholder = "Наприклад: великий відтік населення"),
-           actionButton("save_rule", "Зберегти правило", class = "btn-primary")),
-      card(card_header("Громади, до яких застосовується правило"),
+           actionButton("save_rule", "Зберегти", class = "btn-primary")),
+      card(card_header("Позначені громади"),
            uiOutput("rule_summary"), DTOutput("rule_list"), tags$hr(),
-           tags$h6("Скільки громад потрапляє під правило за різного порогу надійності"), tableOutput("rule_sens")))),
+           tags$h6("Скільки громад було б позначено за іншої межі"), tableOutput("rule_sens")))),
   nav_panel("Налаштування",
     layout_columns(col_widths = c(6, 6),
       card(card_header("Сезони"),
-           selectInput("era_start", "Перший сезон нинішнього періоду", choices = NULL),
-           note("З цього сезону починається період, у якому умови спостереження порівнянні з нинішніми (у Сумській області після початку повномасштабної війни це 2023/2024). Сезони цього періоду завжди входять у розрахунок, старші додаються, лише якщо покращують результат."),
-           checkboxInput("era_first_not_ctl", "Перший сезон періоду не є контрольним (на ньому пороги не перевіряються)", value = TRUE),
-           note("Залиште позначку, якщо перший сезон періоду нетиповий, наприклад почався на хвилі COVID-19."),
+           selectInput("era_start", "Перший сезон, який завжди йде в розрахунок", choices = NULL),
+           note("Це перший сезон після останньої великої зміни, через яку старші дані погано схожі на нинішні: масової міграції населення, нової форми звітності, нового визначення випадку. Для більшості областей це 2023/2024. Цей і всі пізніші сезони завжди входять у розрахунок, старші програма додає лише тоді, коли з ними пороги точніші. Обирають його один раз, під час створення проєкту, і змінюють лише після нової великої зміни."),
+           checkboxInput("era_first_not_ctl", "Не використовувати цей сезон для перевірки порогів", value = TRUE),
+           note("Програма перевіряє пороги на останніх сезонах: рахує поріг без сезону і дивиться, як би він спрацював у цьому сезоні. Залиште позначку, якщо обраний сезон нетиповий, наприклад почався на хвилі COVID-19: тоді на ньому пороги не перевірятимуться, але в розрахунок він усе одно увійде."),
            tags$hr(),
            tags$h6("Сезони, які програма відсікає сама"),
            tableOutput("auto_excl"),
@@ -157,38 +159,10 @@ ui <- page_navbar(
            actionButton("ex_add", "Додати виключення", class = "btn-outline-primary"),
            tags$div(style = "margin-top:10px", DTOutput("ex_table")),
            actionButton("ex_del", "Видалити позначене виключення", class = "btn-outline-danger btn-sm")),
-      card(card_header("Розрахунок і сповіщення"),
+      card(card_header(if (exists("notify_ui")) "Розрахунок і сповіщення" else "Розрахунок"),
            numericInput("workers", "Скільки ядер процесора використовувати", value = 2, min = 1, max = parallel::detectCores(), step = 1),
            note(sprintf("На цьому комп'ютері %d ядер. Що більше ядер, то швидше розрахунок, але комп'ютер під час нього працює повільніше. На слабкому комп'ютері поставте 2.", parallel::detectCores())),
-           tags$hr(),
-           tags$h6("Сповіщення про перерахунок порогів"),
-           note("Застосунок може сам перераховувати пороги раз на тиждень за розкладом (налаштовується нижче) і повідомляти про це. Повідомлення надходить у двох випадках: пороги перераховано, бо в даних з'явився новий завершений сезон, і тоді в листі нові пороги; або розрахунок за розкладом не вдався, і тоді в листі причина. Отримувачами зазвичай є епідеміолог, який відповідає за пороги, і керівник відділу. Якщо розклад не вмикати, сповіщення не потрібні: виберіть «Не надсилати»."),
-           radioButtons("n_method", NULL, c("Не надсилати" = "none", "Пошта" = "email", "Telegram" = "telegram", "Пошта і Telegram" = "both"), inline = TRUE),
-           conditionalPanel("input.n_method == 'email' || input.n_method == 'both'",
-             textAreaInput("emails", "Адреси отримувачів (кожна з нового рядка)", rows = 3, placeholder = "epid@cgz.example.ua"),
-             layout_columns(col_widths = c(8, 4), textInput("smtp_server", "Поштовий сервер (SMTP)", placeholder = "smtp.gmail.com"),
-                            numericInput("smtp_port", "Порт", value = 465, min = 1, max = 65535)),
-             layout_columns(col_widths = c(6, 6), textInput("smtp_user", "Логін", placeholder = "memopt.oblast@gmail.com"),
-                            passwordInput("smtp_password", "Пароль", placeholder = "залиште порожнім, щоб не змінювати")),
-             textInput("smtp_from", "Адреса відправника (якщо інша, ніж логін)"),
-             note("Для Gmail: сервер smtp.gmail.com, порт 465, пароль застосунку (Google Account, Безпека, Паролі застосунків), а не звичайний пароль.")),
-           conditionalPanel("input.n_method == 'telegram' || input.n_method == 'both'",
-             passwordInput("tg_token", "Токен бота Telegram", placeholder = "залиште порожнім, щоб не змінювати"),
-             textInput("tg_chats", "Чати (номери через кому)", placeholder = "-1001234567890"),
-             note("Бота створює @BotFather; бота треба додати в групу або канал. Номер чату можна дізнатися, написавши боту і відкривши https://api.telegram.org/bot<токен>/getUpdates.")),
-           note("Паролі й токени зберігаються окремо від налаштувань, у файлі secrets.json у папці проєкту."),
-           actionButton("n_test", "Надіслати пробне повідомлення", class = "btn-outline-primary btn-sm"),
-           uiOutput("n_test_result"),
-           tags$hr(),
-           tags$h6("Розклад"),
-           note("Щотижнева перевірка: якщо в даних з'явився новий завершений сезон (після 20-го тижня), пороги перераховуються, і надходить сповіщення. Розрахунок на вимогу, як і раніше, кнопкою на вкладці «Розрахунок»."),
-           layout_columns(col_widths = c(6, 6),
-             selectInput("sch_day", "День", c("понеділок" = "MON", "вівторок" = "TUE", "середа" = "WED", "четвер" = "THU", "п'ятниця" = "FRI")),
-             textInput("sch_time", "Час", value = "09:00")),
-           uiOutput("sch_status"),
-           layout_columns(col_widths = c(6, 6),
-             actionButton("sch_on", "Увімкнути розклад", class = "btn-outline-primary btn-sm"),
-             actionButton("sch_off", "Вимкнути розклад", class = "btn-outline-danger btn-sm")),
+           if (exists("notify_ui")) notify_ui(),
            tags$hr(),
            tags$h6("Інші параметри (лише для перегляду)"),
            tableOutput("settings"),
@@ -311,12 +285,12 @@ server <- function(input, output, session) {
     r <- tryCatch(apply_population(rv$tb, input$upload_pop$datapath), error = function(e) NULL)
     if (is.null(r)) { showNotification("Файл не вдалося прочитати: потрібні колонки назва і населення.", type = "error"); return() }
     rv$tb <- r$tb; rv$unmatched <- r$unmatched
-    showNotification("Населення додано. Не забудьте зберегти перелік.", type = "message")
+    showNotification("Населення додано. Не забудьте зберегти перелік територій.", type = "message")
   })
   output$pop_unmatched <- renderUI({
     u <- rv$unmatched
     if (is.null(u) || !nrow(u)) return(NULL)
-    tagList(tags$p(class = "text-danger", sprintf("%d %s з файлу не знайдено в переліку:", nrow(u), plur(nrow(u), "назва", "назви", "назв"))), renderTable(u))
+    tagList(tags$p(class = "text-danger", sprintf("%d %s з файлу не знайдено в переліку територій:", nrow(u), plur(nrow(u), "назва", "назви", "назв"))), renderTable(u))
   })
   output$terr_check <- renderDT({
     x <- terr_chk(); if (is.null(x)) x <- data.frame(Повідомлення = "Помилок немає")
@@ -324,7 +298,7 @@ server <- function(input, output, session) {
   })
   observeEvent(input$save_terr, {
     x <- terr_chk()
-    if (n_errors(x)) { showNotification("Спершу виправте помилки в переліку (таблиця під переліком).", type = "error"); return() }
+    if (n_errors(x)) { showNotification("Спершу виправте помилки в переліку територій (таблиця під ним).", type = "error"); return() }
     write_territories(rv$tb, proj_dir(P())); rv$tb <- territory_table(proj_dir(P()))
     showNotification("Перелік територій збережено.", type = "message"); rv$tick <- rv$tick + 1
   })
@@ -385,7 +359,7 @@ server <- function(input, output, session) {
                                               style = sprintf("width:%d%%", max(pct, 3)), sprintf("%d%%", pct))),
         note(paste0("Минуло ", mmss(el), left, ".", if (is.na(prev)) " Після першого розрахунку програма запам'ятає його тривалість і показуватиме, скільки лишилось." else ""))))
     }
-    if (identical(rv$msg, "done")) tags$p(class = "text-success", tags$b("Готово. Результати на вкладках «Результати» і «Правило для малих громад»."))
+    if (identical(rv$msg, "done")) tags$p(class = "text-success", tags$b("Готово. Результати на вкладках «Результати» і «Громади з малою кількістю випадків»."))
     else {
       # непередбачена помилка: показати її людською мовою і дати зберегти журнал для розробника
       lg <- if (!is.null(rv$log) && file.exists(rv$log)) readLines(rv$log, warn = FALSE, encoding = "UTF-8") else character(0)
@@ -419,7 +393,7 @@ server <- function(input, output, session) {
   output$dl_csv <- downloadHandler(filename = function() paste0("memopt_пороги_", P(), ".csv"),
                                    content = function(file) file.copy(file.path(proj_dir(P()), "output", "memopt_thresholds.csv"), file))
 
-  # ----- правило підтвердження районом
+  # ----- громади з малою кількістю випадків
   observeEvent(input$project, {
     cfg <- read_cfg(P())
     updateNumericInput(session, "rel_min", value = if (is.null(cfg$district_confirm$reliability_min_cases)) RELIABILITY_DEFAULT else cfg$district_confirm$reliability_min_cases)
@@ -441,21 +415,21 @@ server <- function(input, output, session) {
     if (is.null(rt)) return(note("Список з'явиться після розрахунку порогів для громад."))
     n <- sum(rt$by_rule | rt$manual)
     tags$p(tags$span(class = "rule-num", n), " ", plur(n, "громада", "громади", "громад"), " з ", nrow(rt), ": ",
-           sum(rt$by_rule), " за порогом надійності, ", sum(rt$manual & !rt$by_rule), " додано вручну.")
+           sum(rt$by_rule), " через малу кількість випадків, ", sum(rt$manual & !rt$by_rule), " додано вручну.")
   })
   output$rule_list <- renderDT({
     rt <- rule_now(); req(rt)
     v <- data.frame(Громада = rt$name, Населення = rt$population, `Середній поріг на 100 тис.` = round(rt$medium, 1),
                     `Середній поріг, випадків на тиждень` = round(rt$cases, 1),
-                    Правило = ifelse(rt$by_rule, "так, за порогом надійності", ifelse(rt$manual, "так, додано вручну", "ні")), check.names = FALSE)
-    datatable(v[order(v$Правило == "ні", v$`Середній поріг, випадків на тиждень`), ], rownames = FALSE,
+                    Позначено = ifelse(rt$by_rule, "так, мало випадків", ifelse(rt$manual, "так, додано вручну", "ні")), check.names = FALSE)
+    datatable(v[order(v$Позначено == "ні", v$`Середній поріг, випадків на тиждень`), ], rownames = FALSE,
               options = list(pageLength = 15, language = lang(search = "Пошук:"))) |>
-      formatStyle("Правило", color = styleEqual(c("ні"), c("#5b6573"), default = "#17345E"), fontWeight = "bold")
+      formatStyle("Позначено", color = styleEqual(c("ні"), c("#5b6573"), default = "#17345E"), fontWeight = "bold")
   })
   output$rule_sens <- renderTable({
     rt <- rule_now(); req(rt)
-    data.frame(`Поріг надійності, випадків на тиждень` = as.integer(SENS_LEVELS),
-               `Громад за порогом` = vapply(SENS_LEVELS, function(l) sum(rt$cases < l), integer(1)),
+    data.frame(`Замало, якщо менше ніж (випадків на тиждень)` = as.integer(SENS_LEVELS),
+               `Громад з малою кількістю випадків` = vapply(SENS_LEVELS, function(l) sum(rt$cases < l), integer(1)),
                `Разом із доданими вручну` = vapply(SENS_LEVELS, function(l) sum(rt$cases < l | rt$manual), integer(1)), check.names = FALSE)
   }, striped = TRUE, bordered = TRUE)
   observeEvent(input$save_rule, {
@@ -471,14 +445,14 @@ server <- function(input, output, session) {
     on <- rt$id[rt$by_rule | rt$manual]
     terr$district_confirm <- ifelse(terr$kind == "small", ifelse(terr[[1]] %in% on, "так", "ні"), NA)
     write.csv(terr, tf, row.names = FALSE, na = "", fileEncoding = "UTF-8")
-    showNotification(sprintf("Правило збережено: %d %s.", length(on), plur(length(on), "громада", "громади", "громад")), type = "message")
+    showNotification(sprintf("Збережено: позначено %d %s.", length(on), plur(length(on), "громада", "громади", "громад")), type = "message")
   })
 
   output$settings <- renderTable({
     rv$settings_saved
     f <- file.path(proj_dir(P()), "config.json"); if (!file.exists(f)) return(NULL)
     c <- fromJSON(f, simplifyVector = TRUE)
-    data.frame(Параметр = c("Кути нахилу, що перебираються", "Кут для меж епідемії в контрольних сезонах", "Найбільше сезонів у розрахунку", "Межа падіння порогу на кроці кута",
+    data.frame(Параметр = c("Кути нахилу, що перебираються", "Кут, за яким визначаються межі епідемії під час перевірки порогів", "Найбільше сезонів у розрахунку", "Межа падіння порогу на кроці кута",
                             "Ваги хибного сигналу і тижня запізнення"),
                Значення = c(paste0("від ", c$angle$min, " до ", c$angle$max, " з кроком ", c$angle$step), c$angle$truth_angle, c$season$max_seasons,
                             paste0(round(100 * c$angle$stability_drop), "%"), paste(c$angle$weights$false_alert, c$angle$weights$delay, sep = " : ")), check.names = FALSE)
@@ -505,14 +479,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "ex_season", choices = setdiff(seas, names(AUTO_EXCLUDE)))
     updateSelectInput(session, "ex_terr", choices = c("усі території" = "", setNames(unname(ids), names(ids))))
     updateNumericInput(session, "workers", value = if (is.null(cfg$parallel$workers)) 2 else cfg$parallel$workers)
-    n <- cfg$notifications
-    updateTextAreaInput(session, "emails", value = paste(unlist(n$emails), collapse = "\n"))
-    updateRadioButtons(session, "n_method", selected = if (is.null(n$method)) "none" else n$method)
-    updateTextInput(session, "smtp_server", value = if (is.null(n$smtp$server)) "" else n$smtp$server)
-    updateNumericInput(session, "smtp_port", value = if (is.null(n$smtp$port)) 465 else n$smtp$port)
-    updateTextInput(session, "smtp_user", value = if (is.null(n$smtp$user)) "" else n$smtp$user)
-    updateTextInput(session, "smtp_from", value = if (is.null(n$smtp$from)) "" else n$smtp$from)
-    updateTextInput(session, "tg_chats", value = paste(unlist(n$telegram$chats), collapse = ", "))
+    if (exists("notify_load")) notify_load(session, cfg)
     ex <- list()
     for (s in names(cfg$exclude_seasons)) ex[[length(ex) + 1]] <- data.frame(Сезон = s, Територія = "усі території", Код = "", Причина = cfg$exclude_seasons[[s]])
     for (id in names(cfg$exclude_territory_seasons)) for (s in names(cfg$exclude_territory_seasons[[id]]))
@@ -540,9 +507,6 @@ server <- function(input, output, session) {
   })
   # збереження всіх налаштувань; повертає FALSE, якщо щось введено неправильно
   save_all <- function() {
-    em <- trimws(unlist(strsplit(input$emails, "[\n,;]+"))); em <- em[nzchar(em)]
-    bad <- em[!grepl("^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$", em)]
-    if (length(bad)) { showNotification(paste("Неправильна адреса:", paste(bad, collapse = ", ")), type = "error"); return(FALSE) }
     w <- input$workers
     if (is.na(w) || w < 1) { showNotification("Кількість ядер має бути не менше 1.", type = "error"); return(FALSE) }
     cfg <- read_cfg(P())
@@ -553,48 +517,13 @@ server <- function(input, output, session) {
     cfg$exclude_territory_seasons <- setNames(list(), character(0))
     for (id in unique(one_ex$Код)) { r <- one_ex[one_ex$Код == id, ]; cfg$exclude_territory_seasons[[id]] <- setNames(as.list(r$Причина), r$Сезон) }
     cfg$parallel$workers <- as.integer(min(w, parallel::detectCores()))
-    chats <- trimws(unlist(strsplit(input$tg_chats, "[,; ]+"))); chats <- chats[nzchar(chats)]
-    cfg$notifications <- list(method = input$n_method, emails = as.list(em),
-                              smtp = list(server = trimws(input$smtp_server), port = as.integer(input$smtp_port), user = trimws(input$smtp_user), from = trimws(input$smtp_from)),
-                              telegram = list(chats = as.list(chats)))
+    if (exists("notify_save")) { cfg <- notify_save(input, session, cfg, proj_dir(P())); if (is.null(cfg)) return(FALSE) }
     write_cfg(P(), cfg)
-    sec <- read_secrets(proj_dir(P()))
-    if (nzchar(input$smtp_password)) sec$smtp_password <- input$smtp_password
-    if (nzchar(input$tg_token)) sec$telegram_token <- trimws(input$tg_token)
-    write_secrets(proj_dir(P()), sec)
-    updateTextInput(session, "smtp_password", value = ""); updateTextInput(session, "tg_token", value = "")
     rv$settings_saved <- format(Sys.time(), "%H:%M")
     TRUE
   }
   observeEvent(input$save_settings, save_all())
-  observeEvent(input$n_test, {
-    if (!save_all()) return()
-    r <- notify(proj_dir(P()), "memopt: пробне повідомлення", paste0("Це пробне повідомлення застосунку memopt, проєкт «", P(), "». Якщо ви його отримали, сповіщення налаштовано правильно."))
-    rv$n_test <- r
-  })
-  output$n_test_result <- renderUI({
-    r <- rv$n_test; if (is.null(r)) return(NULL)
-    tags$div(style = "margin-top:8px", lapply(r, function(x) tags$p(class = if (grepl("помилка", x)) "text-danger" else "text-success", x)))
-  })
-  # розклад: завдання планувальника Windows; під час увімкнення запам'ятовується поточний останній сезон, щоб
-  # перша перевірка не перераховувала пороги без нового сезону
-  output$sch_status <- renderUI({
-    rv$sch
-    st <- task_status(P())
-    if (is.null(st)) return(note("Розклад вимкнено."))
-    nxt <- sub("^[^:]+:\\s*", "", grep("Next Run Time|Наступний запуск|Время следующего запуска", st, value = TRUE)[1])
-    tags$p(class = "text-success", "Розклад увімкнено.", if (!is.na(nxt)) paste(" Наступна перевірка:", nxt))
-  })
-  observeEvent(input$sch_on, {
-    if (!save_all()) return()
-    if (!grepl("^[0-2][0-9]:[0-5][0-9]$", input$sch_time)) { showNotification("Час у вигляді 09:00.", type = "error"); return() }
-    s <- all_seasons(file.path(proj_dir(P()), "datasets")); s <- s[!vapply(s, season_running, logical(1))]
-    if (length(s)) writeLines(toJSON(list(last_season = max(s)), auto_unbox = TRUE), file.path(proj_dir(P()), "output", "розклад_стан.json"))
-    r <- tryCatch({ task_create(P(), proj_dir(P()), ROOT, input$sch_day, input$sch_time); "ok" }, error = function(e) conditionMessage(e))
-    if (identical(r, "ok")) showNotification("Розклад увімкнено.", type = "message") else showNotification(paste("Не вдалося створити завдання:", r), type = "error", duration = 15)
-    rv$sch <- Sys.time()
-  })
-  observeEvent(input$sch_off, { task_delete(P()); rv$sch <- Sys.time(); showNotification("Розклад вимкнено.", type = "message") })
+  if (exists("notify_server")) notify_server(input, output, session, P, rv, save_all, ROOT)
   output$settings_saved <- renderUI({
     if (is.null(rv$settings_saved)) return(NULL)
     tags$p(class = "text-success", style = "margin-top:10px", sprintf("Збережено о %s. Нові налаштування подіють під час наступного розрахунку порогів.", rv$settings_saved))
