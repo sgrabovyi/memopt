@@ -2,6 +2,7 @@
 # виправляє його і вказує для громад район і населення. Наявний territories.csv проєкту зберігається: його рядки
 # зіставляються з аркушами за файлом і аркушем, тому вже введене не губиться.
 TYPES <- c("область", "район", "район без центру", "місто", "громада", "не використовувати")
+HKINDS <- c("міська", "селищна", "сільська")
 
 guess_type <- function(name) {
   n <- tolower(name)
@@ -31,14 +32,16 @@ territory_table <- function(proj) {
       o <- o[1, ]
       tp <- if (!is.na(o$level) && o$level %in% TYPES) o$level else if (identical(o$kind, "small")) "громада" else guess_type(o$name)
       dist_id <- if (tp == "громада") o$group else NA
-      data.frame(Код = o$id, Назва = o$name, Тип = tp, Район = NA_character_, `.dist_id` = dist_id, `.ref_id` = o$reference_id,
+      hk <- if (tp != "громада") NA_character_ else if (!is.null(o$type) && !is.na(o$type) && o$type %in% HKINDS) o$type else guess_kind_of_hromada(o$name)
+      data.frame(Код = o$id, Назва = o$name, Тип = tp, `Вид громади` = hk, Район = NA_character_, `.dist_id` = dist_id, `.ref_id` = o$reference_id,
                  Населення = suppressWarnings(as.numeric(o$population)), Файл = f, Аркуш = s, Сезонів = sh$seasons[i], check.names = FALSE)
     } else {
-      data.frame(Код = NA_character_, Назва = s, Тип = guess_type(s), Район = NA_character_, `.dist_id` = NA, `.ref_id` = NA,
+      tp <- guess_type(s)
+      data.frame(Код = NA_character_, Назва = s, Тип = tp, `Вид громади` = if (tp == "громада") guess_kind_of_hromada(s) else NA_character_, Район = NA_character_, `.dist_id` = NA, `.ref_id` = NA,
                  Населення = NA_real_, Файл = f, Аркуш = s, Сезонів = sh$seasons[i], check.names = FALSE)
     }
   })
-  tb <- if (length(rows)) do.call(rbind, rows) else data.frame(Код = character(0), Назва = character(0), Тип = character(0), Район = character(0), `.dist_id` = character(0),
+  tb <- if (length(rows)) do.call(rbind, rows) else data.frame(Код = character(0), Назва = character(0), Тип = character(0), `Вид громади` = character(0), Район = character(0), `.dist_id` = character(0),
                                                               `.ref_id` = character(0), Населення = numeric(0), Файл = character(0), Аркуш = character(0), Сезонів = integer(0), check.names = FALSE)
   # район для громад і районів без центру: з наявного переліку (код району), інакше з назви
   dn <- setNames(tb$Назва, tb$Код)
@@ -68,6 +71,7 @@ check_territories <- function(tb) {
     nm <- use$Назва[i]
     if (is.na(use$Район[i]) || !nzchar(use$Район[i])) add("помилка", nm, "не вказано район громади", "Впишіть у колонку «Район» назву району так само, як вона записана в переліку")
     else if (!(use$Район[i] %in% districts)) add("помилка", nm, sprintf("район «%s» не знайдено серед територій типу «район»", use$Район[i]), "Перевірте написання або тип району")
+    if (is.na(use$`Вид громади`[i]) || !(use$`Вид громади`[i] %in% HKINDS)) add("помилка", nm, "не вказано вид громади", "Впишіть у колонку «Вид громади» одне зі слів: міська, селищна, сільська. Від виду залежить еталон: міська громада спирається на весь район, селищна і сільська на район без центру")
     if (is.na(use$Населення[i]) || use$Населення[i] <= 0) add("помилка", nm, "не вказано населення громади", "Впишіть населення в колонку «Населення» або завантажте файл населення")
     if (!is.na(use$Сезонів[i]) && use$Сезонів[i] < 3) add("увага", nm, sprintf("лише %d сезон(и) даних", use$Сезонів[i]), "Для порогу потрібно щонайменше 3 сезони; поріг громади спиратиметься на район")
   }
@@ -104,7 +108,7 @@ write_territories <- function(tb, proj) {
   ref <- group <- rep(NA_character_, nrow(use)); htype <- rep(NA_character_, nrow(use))
   for (i in seq_len(nrow(use))) {
     if (use$Тип[i] == "громада") {
-      d <- id_of[use$Район[i]]; htype[i] <- guess_kind_of_hromada(use$Назва[i]); group[i] <- d
+      d <- id_of[use$Район[i]]; htype[i] <- use$`Вид громади`[i]; group[i] <- d
       ref[i] <- if (!identical(htype[i], "міська") && !is.na(nc_of[use$Район[i]])) nc_of[[use$Район[i]]] else d
     } else if (use$Тип[i] == "район") group[i] <- obl
   }
