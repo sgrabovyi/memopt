@@ -1,4 +1,5 @@
 # memopt: застосунок shiny для розрахунку порогів MEM.
+# Інтерфейс кроками: смуга етапів угорі, на кожному кроці одне речення «що зробити» і кнопка переходу далі.
 # Етап 1: проєкти областей, завантаження даних, розрахунок у фоні з журналом, результати.
 # Етап 2: перевірка даних з точним місцем і порадою, перелік територій з назв аркушів, населення громад,
 # громади з малою кількістю випадків (за межею надійності, чутливість, ручне додавання з причиною).
@@ -32,20 +33,6 @@ dataset_table <- function(p) {
 
 n_errors <- function(x) if (is.null(x)) 0L else sum(x$Рівень == "помилка")
 
-project_status <- function(p, data_chk, terr_chk) {
-  d <- proj_dir(p)
-  ds <- dataset_table(p)
-  thr <- file.path(d, "output", "memopt_thresholds.csv")
-  de <- n_errors(data_chk); te <- n_errors(terr_chk)
-  data.frame(
-    Що = c("Ряди захворюваності", "Перевірка даних", "Перелік територій", "Результати розрахунку"),
-    Стан = c(if (nrow(ds)) paste("є:", nrow(ds), plur(nrow(ds), "файл", "файли", "файлів")) else "немає: завантажте на вкладці «Дані»",
-             if (is.null(data_chk)) "ще не перевірялись" else if (de) paste(de, plur(de, "помилка", "помилки", "помилок"), "у даних: див. вкладку «Дані»") else "помилок немає",
-             if (!file.exists(file.path(d, "territories.csv"))) "не збережено: див. вкладку «Території»" else if (te) paste(te, plur(te, "помилка", "помилки", "помилок"), "у переліку: див. вкладку «Території»") else "збережено, помилок немає",
-             if (file.exists(thr)) paste("є, розрахунок від", format(file.mtime(thr), "%d.%m.%Y %H:%M")) else "ще не рахувалось"),
-    check.names = FALSE)
-}
-
 # Громади з малою кількістю випадків: середній поріг громади в кількості випадків на тиждень
 rule_table <- function(p) {
   d <- proj_dir(p)
@@ -62,122 +49,195 @@ rule_table <- function(p) {
 }
 
 # ---------------------------------------------------------------- інтерфейс
+# Робота йде кроками. Угорі смуга етапів: пройдені темні, поточний обведений, ще не пройдені бліді; клацання на етапі
+# відкриває його. На кожному кроці вгорі одним реченням сказано, що зробити, а внизу кнопка переходу до наступного кроку.
+# Довгі пояснення сховані під «Докладніше». Налаштування окремою кнопкою вгорі, бо їх змінюють рідко.
 theme <- bs_theme(version = 5, primary = "#17345E", secondary = "#0076be", base_font = font_collection("Segoe UI", "Arial", "sans-serif"))
 note <- function(...) tags$p(class = "muted", ...)
+more <- function(title, ...) tags$details(class = "more", tags$summary(title), tags$div(class = "more-body", ...))
+STEPS <- c(project = "Проєкт", data = "Дані", terr = "Території", run = "Розрахунок", res = "Результати", small = "Громади з малою кількістю випадків")
+step_head <- function(key, what) tags$div(class = "step-head", tags$h4(sprintf("Крок %d. %s", match(key, names(STEPS)), STEPS[[key]])), tags$p(class = "lead-what", what))
+box <- function(title, ..., cls = "") tags$div(class = paste("box", cls), if (!is.null(title)) tags$h6(class = "box-title", title), ...)
+SHEET_NAMES <- tags$table(class = "table table-sm names",
+  tags$thead(tags$tr(tags$th("На аркуші"), tags$th("Що це"), tags$th("Назва в застосунку"))),
+  tags$tbody(lapply(list(c("Сумська обл.", "область", "Сумська область"), c("Конотопський р-н", "район", "Конотопський район"),
+                         c("Конотопський без центру", "район без районного центру", "Конотопський район без центру"),
+                         c("м. Конотоп", "районний центр", "м. Конотоп"), c("Буринська МТГ", "міська громада", "Буринська міська ТГ"),
+                         c("Миколаївська СелТГ", "селищна громада", "Миколаївська селищна ТГ"), c("Бочечківська СілТГ", "сільська громада", "Бочечківська сільська ТГ")),
+                    function(r) tags$tr(lapply(r, tags$td)))))
 
-ui <- page_navbar(
-  # fillable = FALSE: вкладки мають звичайну висоту і прокручуються, а не стискаються до висоти вікна
-  # (інакше вміст карток накладається один на одний)
-  title = "memopt: пороги MEM", theme = theme, id = "tabs", fillable = FALSE,
-  header = tags$head(tags$style(HTML("
-    .log-box { background:#0f1b2d; color:#dfe7f2; font-family:Consolas,monospace; font-size:12.5px; height:420px; overflow-y:auto; white-space:pre-wrap; padding:12px; border-radius:8px; }
+ui <- page(
+  title = "memopt: пороги MEM", theme = theme,
+  tags$head(tags$style(HTML("
+    body { background:#f4f6f9; }
+    .wrap { max-width:1280px; margin:0 auto; padding:0 20px 40px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:14px 0 6px; }
+    .topbar .brand { font-size:20px; font-weight:700; color:#17345E; }
+    .topbar .proj { color:#5b6573; margin-left:12px; font-size:15px; }
+    .stepper { display:flex; margin:10px 0 22px; background:#fff; border-radius:10px; padding:16px 8px 12px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    .step { flex:1; text-align:center; position:relative; cursor:pointer; padding:0 4px; }
+    .step .dot { width:34px; height:34px; border-radius:50%; line-height:30px; margin:0 auto 6px; font-weight:700; background:#e6eaf0; color:#9aa5b5; border:2px solid #e6eaf0; position:relative; z-index:1; }
+    .step.done .dot { background:#17345E; color:#fff; border-color:#17345E; }
+    .step.current .dot { background:#fff; color:#17345E; border-color:#17345E; box-shadow:0 0 0 4px #d6e0ee; }
+    .step .lbl { font-size:13px; color:#9aa5b5; line-height:1.25; }
+    .step.done .lbl, .step.current .lbl { color:#17345E; font-weight:600; }
+    .step:not(:last-child)::after { content:''; position:absolute; top:16px; left:calc(50% + 20px); right:calc(-50% + 20px); height:3px; background:#e6eaf0; }
+    .step.done:not(:last-child)::after { background:#17345E; }
+    .step-head h4 { color:#17345E; font-weight:700; margin-bottom:4px; }
+    .lead-what { font-size:16px; color:#2b3440; margin-bottom:16px; }
+    .box { background:#fff; border-radius:10px; padding:16px 18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+    .box-title { font-weight:700; color:#17345E; margin-bottom:10px; }
+    .box.bad { border-left:5px solid #B83227; }
+    .box.good { border-left:5px solid #2e7d32; }
+    .box.warn { border-left:5px solid #C98A00; }
+    .box.action { border-top:4px solid #17345E; }
+    .num { display:inline-block; width:26px; height:26px; border-radius:50%; background:#17345E; color:#fff; text-align:center; line-height:26px; font-weight:700; margin-right:8px; }
+    .next-bar { display:flex; justify-content:flex-end; align-items:center; gap:16px; margin-top:8px; }
+    .next-bar .why { color:#5b6573; }
+    .btn-next { font-size:17px; padding:10px 22px; }
     .muted { color:#5b6573; }
+    .more { margin:8px 0; } .more summary { cursor:pointer; color:#0076be; } .more-body { padding:8px 0 0 14px; color:#3b4552; }
+    .ok-line { color:#2e7d32; font-weight:600; } .bad-line { color:#B83227; font-weight:600; }
+    .log-box { background:#0f1b2d; color:#dfe7f2; font-family:Consolas,monospace; font-size:12.5px; height:420px; overflow-y:auto; white-space:pre-wrap; padding:12px; border-radius:8px; }
     .rule-num { font-size:28px; font-weight:700; color:#17345E; }
-    .progress { height:24px; font-size:13px; margin:8px 0; }"))),
-  nav_panel("Проєкт",
-    layout_columns(col_widths = c(4, 8),
-      card(card_header("Проєкт області"),
-           selectInput("project", "Відкрити проєкт", choices = list_projects()),
-           tags$hr(),
-           textInput("new_name", "Або створіть новий", placeholder = "Наприклад: Сумська область"),
-           actionButton("create", "Створити проєкт", class = "btn-primary"),
-           note(style = "margin-top:12px", "Кожна область має свою папку в projects: дані, налаштування і результати зберігаються там і не змішуються з іншими областями.")),
-      card(card_header("Що готово в проєкті"), tableOutput("status"), uiOutput("status_hint")))),
-  nav_panel("Дані",
-    layout_columns(col_widths = c(4, 8),
-      card(card_header("Завантаження"),
-           fileInput("upload_xlsx", "Ряди захворюваності (Excel, можна кілька файлів)", multiple = TRUE, accept = ".xlsx", buttonLabel = "Обрати", placeholder = "файли не обрано"),
-           note("Потрібні ряди області, усіх районів і всіх громад. Дуже бажані ряди районів без районного центру: без них пороги селищних і сільських громад будуть менш точними. Ряди районних центрів додайте, якщо для них потрібні власні пороги."),
-           note("Кожен аркуш це одна територія. Excel дозволяє в назві аркуша не більше 31 символу, тому пишіть назви коротко: «Сумська обл.», «Конотопський р-н», «Конотопський без центру» (район без районного центру), «м. Конотоп», «Буринська МТГ» (міська громада), «Миколаївська СелТГ» (селищна), «Бочечківська СілТГ» (сільська). Програма розпізнає ці скорочення і сама запише повні назви на вкладці «Території»; там же будь-яку назву можна виправити. Назви в межах області мають бути різними: громади з однаковою назвою розрізніть районом у дужках. Коди адмінодиниць не потрібні."),
-           note("У першій колонці тижні від 40 до 52, потім від 1 до 20; далі колонка на кожен сезон з назвою 2023/2024; значення це кількість випадків на 100 тис. населення за тиждень, як у memapp."),
-           actionButton("check_data", "Перевірити дані", class = "btn-outline-primary")),
-      card(card_header("Файли проєкту"), DTOutput("datasets")))),
-  nav_panel("Перевірка даних",
-    card(card_header("Помилки у файлах"), uiOutput("data_check_summary"), DTOutput("data_check")),
-    card(card_header("Що варто переглянути в даних (з останнього розрахунку)"),
-         note("Під час розрахунку програма переглядає кожен сезон кожної території і позначає ті, що помітно відрізняються від звичних: багато нульових чи пропущених тижнів або пік, утричі вищий чи нижчий за звичайний для цієї території. Це не помилки, такі сезони беруться в розрахунок. Але варто перевірити, чи правильно внесені дані: якщо сезон справді зіпсований, його можна виключити на вкладці «Налаштування»."),
-         uiOutput("flags_summary"), DTOutput("flags"))),
-  nav_panel("Території",
-    layout_columns(col_widths = c(4, 8),
-      card(card_header("Як заповнити"),
-           note("Перелік територій складено з назв аркушів. Тип території і вид громади програма визначила за назвою; виправте їх, якщо треба: двічі клацніть клітинку, впишіть значення і натисніть Enter."),
-           tags$p(tags$b("Типи: "), paste(TYPES, collapse = ", "), "."),
-           tags$p(tags$b("Вид громади: "), paste(HKINDS, collapse = ", "), "."),
-           note("Для кожної громади перевірте вид і вкажіть район (так само, як він записаний у колонці «Назва») і населення."),
-           note("Ряд однієї громади короткий і нерівний, тому поріг лише за ним був би нестійким. Програма розраховує поріг громади з урахуванням даних більшої території, до якої громада належить; таку територію називаємо еталоном. Для міської громади еталон це весь район, для селищної і сільської район без районного центру, бо в місті захворюваність зростає і спадає інакше, ніж у селах. Якщо району без районного центру немає, еталоном буде весь район."),
-           tags$h6("Населення громад"),
-           note("Населення потрібне лише для того, щоб перевести середній поріг громади з показника на 100 тис. у кількість випадків на тиждень: так програма знаходить громади, де випадків замало (вкладка «Громади з малою кількістю випадків»). Тому досить одного числа, останнього відомого населення. Показники на 100 тис. у рядах рахуються ще до завантаження в застосунок, і там береться населення відповідного року. Населення можна вписати в таблицю вручну або завантажити одним файлом Excel чи CSV: у першій колонці назва громади так само, як у колонці «Назва» переліку територій, у другій кількість населення. Третя колонка необов'язкова: якщо вписати в неї назву району, до якого належить громада (наприклад «Конотопський район»), програма заповнить і колонку «Район». Назви, яких програма не знайде, з'являться нижче."),
-           fileInput("upload_pop", "Завантажити файл з населенням громад", accept = c(".xlsx", ".csv"), buttonLabel = "Обрати", placeholder = "файл не обрано"),
-           uiOutput("pop_unmatched"),
-           note("Якщо населення громад після 2022 року помітно змінилось через міграцію, а знаменник лишився старим, пороги таких громад можуть працювати гірше."),
-           actionButton("save_terr", "Зберегти перелік територій", class = "btn-primary")),
-      card(card_header("Перелік територій"), DTOutput("terr_table"), tags$hr(), tags$h6("Перевірка переліку територій"), DTOutput("terr_check")))),
-  nav_panel("Розрахунок",
-    layout_columns(col_widths = c(4, 8),
-      card(card_header("Запуск"),
-           uiOutput("run_ready"),
-           actionButton("run", "Розрахувати пороги", class = "btn-primary btn-lg"),
-           note(style = "margin-top:12px", "Розрахунок триває від 3 до 10 хвилин. Вікно можна не закривати й переглядати інші вкладки."),
-           uiOutput("run_state")),
-      card(card_header("Журнал розрахунку"), div(class = "log-box", textOutput("log"))))),
-  nav_panel("Результати",
-    card(card_header("Пороги на 100 тис. населення за тиждень"),
-         layout_columns(col_widths = c(3, 3, 6),
-           downloadButton("dl_xlsx", "Книга результатів (Excel)"),
-           downloadButton("dl_csv", "Таблиця порогів (CSV)"),
-           radioButtons("res_kind", NULL, c("Усі території" = "all", "Основні території" = "основна", "Громади" = "мала"), inline = TRUE)),
-         DTOutput("thresholds"))),
-  nav_panel("Громади з малою кількістю випадків",
-    layout_columns(col_widths = c(4, 8),
-      card(card_header("Громади з малою кількістю випадків"),
-           tags$p("У громаді, де за тиждень буває лише кілька випадків, рівень може піднятися випадково. Тому в таких громадах середній і вищі рівні показуються лише тоді, коли захворюваність у районі без районного центру (а якщо його немає, у всьому районі) перевищила свій епідемічний поріг. До того громада показує низький рівень з приміткою про місцеве підвищення."),
-           numericInput("rel_min", "Випадків на тиждень замало, якщо їх менше ніж", value = RELIABILITY_DEFAULT, min = 1, max = 100, step = 1),
-           note("Програма переводить середній поріг громади у кількість випадків на тиждень і позначає громади, де ця кількість менша за вказану. Типове значення 20 випадків: показники, що спираються на менш ніж 20 випадків, мають відносну похибку 23% і більше (Klein et al., 2002, Healthy People Statistical Notes 24)."),
-           selectizeInput("rule_manual", "Додати громади вручну", choices = NULL, multiple = TRUE, options = list(placeholder = "оберіть громади")),
-           textInput("rule_reason", "Причина ручного додавання", placeholder = "Наприклад: великий відтік населення"),
-           actionButton("save_rule", "Зберегти", class = "btn-primary")),
-      card(card_header("Позначені громади"),
-           uiOutput("rule_summary"), DTOutput("rule_list"), tags$hr(),
-           tags$h6("Скільки громад було б позначено за іншої межі"), tableOutput("rule_sens")))),
-  nav_panel("Налаштування",
-    layout_columns(col_widths = c(6, 6),
-      card(card_header("Сезони"),
-           selectInput("era_start", "Сезони для перевірки порогів: починаючи з", choices = NULL),
-           note("Програма вибирає, скільки останніх сезонів брати для розрахунку порогу. Для цього вона перевіряє кожен варіант на сезонах, починаючи з указаного в цьому полі: прибирає один сезон, рахує поріг за рештою сезонів і дивиться, скільки хибних тривог дав би поріг у прибраному сезоні і на скільки тижнів запізнився б сигнал про початок епідемії."),
-           note("Вкажіть у полі перший сезон після останньої події, яка помітно змінила рівень захворюваності або облік випадків: масового виїзду чи повернення населення, нової форми звітності, нового визначення випадку."),
-           note("Переглядайте поле щороку перед розрахунком. Після нової такої події поле змінюють не одразу, бо для перевірки порогів потрібні щонайменше два завершені сезони. Наприклад, якщо населення почало масово повертатися в сезоні 2027/2028, у полі вказують 2027/2028 лише після завершення сезону 2028/2029. Раніше застосунок не дасть зберегти таку зміну."),
-           checkboxInput("era_first_not_ctl", "Не перевіряти пороги на сезоні, указаному в полі", value = TRUE),
-           note("Позначте, якщо сезон, указаний у полі, нетиповий, наприклад почався на хвилі COVID-19. У розрахунок порогу такий сезон усе одно увійде."),
-           tags$hr(),
-           tags$h6("Сезони, які програма відсікає сама"),
-           tableOutput("auto_excl"),
-           tags$hr(),
-           tags$h6("Виключити сезон з розрахунку"),
-           note("Лише для сезонів з вадами даних (збій обліку, зміна визначення випадку) або незвичайним спалахом. Причина обов'язкова: вона потрапляє в книгу результатів."),
-           layout_columns(col_widths = c(4, 8),
-             selectInput("ex_season", "Сезон", choices = NULL),
-             selectInput("ex_terr", "Для якої території", choices = NULL)),
-           textInput("ex_reason", "Причина", placeholder = "Наприклад: звітність громад не надходила з 3-го по 9-й тиждень"),
-           actionButton("ex_add", "Додати виключення", class = "btn-outline-primary"),
-           tags$div(style = "margin-top:10px", DTOutput("ex_table")),
-           actionButton("ex_del", "Видалити позначене виключення", class = "btn-outline-danger btn-sm")),
-      card(card_header(if (exists("notify_ui")) "Розрахунок і сповіщення" else "Розрахунок"),
-           numericInput("workers", "Скільки ядер процесора використовувати", value = 2, min = 1, max = parallel::detectCores(), step = 1),
-           note(sprintf("На цьому комп'ютері %d ядер. Що більше ядер, то швидше розрахунок, але комп'ютер під час нього працює повільніше. На слабкому комп'ютері поставте 2.", parallel::detectCores())),
-           if (exists("notify_ui")) notify_ui(),
-           tags$hr(),
-           tags$h6("Інші параметри (лише для перегляду)"),
-           tableOutput("settings"),
-           tags$hr(),
-           actionButton("save_settings", "Зберегти налаштування", class = "btn-primary"),
-           uiOutput("settings_saved")))),
-  # вкладка дашборда лише в нашій інсталяції (файл app/R/dashboard.R у пакет для ЦГЗ не входить)
-  if (exists("dashboard_ui")) dashboard_ui()
+    .progress { height:24px; font-size:13px; margin:8px 0; }
+    table.names td, table.names th { padding:3px 10px; }
+    .shiny-input-container { width:100% !important; }"))),
+  tags$div(class = "wrap",
+    tags$div(class = "topbar",
+      tags$div(tags$span(class = "brand", "memopt: пороги MEM"), uiOutput("proj_name", inline = TRUE)),
+      tags$div(uiOutput("top_buttons", inline = TRUE),
+               actionButton("open_settings", "Налаштування", class = "btn-outline-secondary btn-sm"))),
+    uiOutput("stepper"),
+    navset_hidden(id = "tabs",
+      nav_panel_hidden("project",
+        step_head("project", "Створіть проєкт своєї області або відкрийте вже створений."),
+        layout_columns(col_widths = c(6, 6), fill = FALSE,
+          box("Новий проєкт", cls = "action",
+              textInput("new_name", "Назва області", placeholder = "Наприклад: Сумська область"),
+              actionButton("create", "Створити проєкт", class = "btn-primary"),
+              note(style = "margin-top:12px", "Дані, налаштування і результати кожної області зберігаються окремо, у папці projects.")),
+          box("Уже створений проєкт",
+              selectInput("project", NULL, choices = list_projects()),
+              uiOutput("project_info"))),
+        uiOutput("next_project")),
+      nav_panel_hidden("data",
+        step_head("data", "Завантажте файли Excel з рядами захворюваності. Можна вибрати кілька файлів одразу."),
+        box(NULL, cls = "action",
+            fileInput("upload_xlsx", NULL, multiple = TRUE, accept = ".xlsx", buttonLabel = "Обрати файли", placeholder = "файли не обрано", width = "100%"),
+            more("Які файли потрібні і як назвати аркуші",
+                 tags$p(tags$b("Обов'язково: "), "ряди області, усіх районів і всіх громад. ", tags$b("Дуже бажано: "), "ряди районів без районного центру, бо без них пороги селищних і сільських громад будуть менш точними. ",
+                        tags$b("За бажанням: "), "ряди районних центрів, якщо для них потрібні власні пороги."),
+                 tags$p("На аркуші: у першій колонці тижні від 40 до 52, потім від 1 до 20; далі колонка на кожен сезон з назвою 2023/2024; значення це кількість випадків на 100 тис. населення за тиждень, як у memapp. Зразок: templates\\series_template.xlsx."),
+                 tags$p("Кожен аркуш це одна територія, а Excel дозволяє в назві аркуша не більше 31 символу. Пишіть назви коротко, програма сама запише повні:"),
+                 SHEET_NAMES,
+                 tags$p("Назви в межах області мають бути різними: громади з однаковою назвою розрізніть районом у дужках."))),
+        uiOutput("data_summary"),
+        box("Файли проєкту",
+            DTOutput("datasets"),
+            tags$div(style = "margin-top:8px", actionButton("del_file", "Видалити позначений файл", class = "btn-outline-danger btn-sm"),
+                     note(style = "display:inline; margin-left:10px", "Щоб позначити файл, клацніть його рядок."))),
+        uiOutput("data_errors"),
+        uiOutput("next_data")),
+      nav_panel_hidden("terr",
+        step_head("terr", "Програма склала перелік територій з назв аркушів. Перевірте його, додайте населення громад і збережіть."),
+        layout_columns(col_widths = c(4, 4, 4), fill = FALSE,
+          box(tagList(tags$span(class = "num", "1"), "Перевірте тип і вид"), cls = "action",
+              tags$p("Тип території і вид громади програма визначила за назвою. Щоб виправити, двічі клацніть клітинку в таблиці нижче, впишіть значення і натисніть Enter."),
+              note(tags$b("Тип: "), paste(setdiff(TYPES, "не використовувати"), collapse = ", "), ". ", tags$b("Вид громади: "), paste(HKINDS, collapse = ", "), "."),
+              more("Навіщо вид громади",
+                   tags$p("Ряд однієї громади короткий і нерівний, тому поріг лише за ним був би нестійким. Програма розраховує поріг громади з урахуванням даних більшої території, до якої громада належить (у книзі результатів її названо еталоном). Для міської громади це весь район, для селищної і сільської район без районного центру, бо в місті захворюваність зростає і спадає інакше, ніж у селах. Якщо району без районного центру немає, береться весь район."))),
+          box(tagList(tags$span(class = "num", "2"), "Додайте населення громад"), cls = "action",
+              tags$p("Файл Excel або CSV: у першій колонці назва громади, у другій кількість населення, у третій (необов'язково) назва району."),
+              fileInput("upload_pop", NULL, accept = c(".xlsx", ".csv"), buttonLabel = "Обрати файл", placeholder = "не обрано", width = "100%"),
+              uiOutput("pop_unmatched"),
+              more("Навіщо населення",
+                   tags$p("Населення потрібне лише для того, щоб перевести поріг громади з показника на 100 тис. у кількість випадків на тиждень і знайти громади, де випадків замало (крок 6). Тому досить одного числа, останнього відомого населення. Показники на 100 тис. у самих рядах рахуються ще до завантаження в застосунок, з населенням відповідного року."),
+                   tags$p("Населення можна також вписати в колонку «Населення» таблиці вручну."))),
+          box(tagList(tags$span(class = "num", "3"), "Збережіть перелік"), cls = "action",
+              uiOutput("terr_state"),
+              actionButton("save_terr", "Зберегти перелік територій", class = "btn-primary"))),
+        uiOutput("terr_problems"),
+        box("Перелік територій",
+            checkboxInput("terr_only_bad", "Показати лише території, де треба щось виправити", value = FALSE),
+            DTOutput("terr_table")),
+        uiOutput("next_terr")),
+      nav_panel_hidden("run",
+        step_head("run", "Натисніть «Розрахувати пороги». Розрахунок триває від 3 до 10 хвилин; тим часом можна переглядати інші кроки."),
+        layout_columns(col_widths = c(4, 8), fill = FALSE,
+          box(NULL, cls = "action",
+              uiOutput("run_ready"),
+              actionButton("run", "Розрахувати пороги", class = "btn-primary btn-lg"),
+              uiOutput("run_state")),
+          box("Журнал розрахунку", div(class = "log-box", textOutput("log")))),
+        uiOutput("next_run")),
+      nav_panel_hidden("res",
+        step_head("res", "Перегляньте пороги і збережіть книгу результатів. Спершу подивіться сезони, які варто перевірити в даних."),
+        uiOutput("flags_box"),
+        box("Пороги на 100 тис. населення за тиждень",
+            tags$div(style = "display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px",
+                     downloadButton("dl_xlsx", "Книга результатів (Excel)", class = "btn-primary"),
+                     downloadButton("dl_csv", "Таблиця порогів (CSV)", class = "btn-outline-primary"),
+                     radioButtons("res_kind", NULL, c("Усі території" = "all", "Основні території" = "основна", "Громади" = "мала"), inline = TRUE)),
+            note("Що на якому аркуші книги результатів, пояснено в docs\\ЗВІТ_аналіз_книги_результатів.docx."),
+            DTOutput("thresholds")),
+        uiOutput("next_res")),
+      nav_panel_hidden("small",
+        step_head("small", "Перевірте, які громади позначено через малу кількість випадків, і натисніть «Зберегти»."),
+        layout_columns(col_widths = c(4, 8), fill = FALSE,
+          box(NULL, cls = "action",
+              tags$p("У громаді, де за тиждень буває лише кілька випадків, рівень може піднятися випадково. Тому в таких громадах середній і вищі рівні показуються лише тоді, коли захворюваність у районі без районного центру (а якщо його немає, у всьому районі) перевищила свій епідемічний поріг."),
+              numericInput("rel_min", "Випадків на тиждень замало, якщо їх менше ніж", value = RELIABILITY_DEFAULT, min = 1, max = 100, step = 1),
+              more("Чому 20",
+                   tags$p("Програма переводить середній поріг громади у кількість випадків на тиждень і позначає громади, де ця кількість менша за вказану. Показники, що спираються на менш ніж 20 випадків, мають відносну похибку 23% і більше (Klein et al., 2002, Healthy People Statistical Notes 24).")),
+              selectizeInput("rule_manual", "Позначити громади вручну", choices = NULL, multiple = TRUE, options = list(placeholder = "оберіть громади")),
+              textInput("rule_reason", "Причина", placeholder = "Наприклад: великий відтік населення"),
+              actionButton("save_rule", "Зберегти", class = "btn-primary")),
+          box("Позначені громади",
+              uiOutput("rule_summary"), DTOutput("rule_list"), tags$hr(),
+              tags$h6("Скільки громад було б позначено за іншої межі"), tableOutput("rule_sens"))),
+        uiOutput("next_small")),
+      nav_panel_hidden("settings",
+        tags$div(class = "step-head", tags$h4("Налаштування"), tags$p(class = "lead-what", "Змінюйте лише тоді, коли є причина. Після зміни збережіть налаштування і перерахуйте пороги.")),
+        layout_columns(col_widths = c(6, 6), fill = FALSE,
+          box("Сезони",
+              selectInput("era_start", "Сезони для перевірки порогів: починаючи з", choices = NULL),
+              note("Програма вибирає, скільки останніх сезонів брати для розрахунку порогу. Для цього вона перевіряє кожен варіант на сезонах, починаючи з указаного в цьому полі: прибирає один сезон, рахує поріг за рештою сезонів і дивиться, скільки хибних тривог дав би поріг у прибраному сезоні і на скільки тижнів запізнився б сигнал про початок епідемії."),
+              note("Вкажіть у полі перший сезон після останньої події, яка помітно змінила рівень захворюваності або облік випадків: масового виїзду чи повернення населення, нової форми звітності, нового визначення випадку."),
+              note("Переглядайте поле щороку перед розрахунком. Після нової такої події поле змінюють не одразу, бо для перевірки порогів потрібні щонайменше два завершені сезони. Наприклад, якщо населення почало масово повертатися в сезоні 2027/2028, у полі вказують 2027/2028 лише після завершення сезону 2028/2029. Раніше застосунок не дасть зберегти таку зміну."),
+              checkboxInput("era_first_not_ctl", "Не перевіряти пороги на сезоні, указаному в полі", value = TRUE),
+              note("Позначте, якщо сезон, указаний у полі, нетиповий, наприклад почався на хвилі COVID-19. У розрахунок порогу такий сезон усе одно увійде."),
+              tags$hr(),
+              tags$h6("Сезони, які програма відсікає сама"),
+              tableOutput("auto_excl"),
+              tags$hr(),
+              tags$h6("Виключити сезон з розрахунку"),
+              note("Лише для сезонів з вадами даних (збій обліку, зміна визначення випадку) або незвичайним спалахом. Причина обов'язкова: вона потрапляє в книгу результатів."),
+              layout_columns(col_widths = c(4, 8),
+                selectInput("ex_season", "Сезон", choices = NULL),
+                selectInput("ex_terr", "Для якої території", choices = NULL)),
+              textInput("ex_reason", "Причина", placeholder = "Наприклад: звітність громад не надходила з 3-го по 9-й тиждень"),
+              actionButton("ex_add", "Додати виключення", class = "btn-outline-primary"),
+              tags$div(style = "margin-top:10px", DTOutput("ex_table")),
+              actionButton("ex_del", "Видалити позначене виключення", class = "btn-outline-danger btn-sm")),
+          box(if (exists("notify_ui")) "Розрахунок і сповіщення" else "Розрахунок",
+              numericInput("workers", "Скільки ядер процесора використовувати", value = 2, min = 1, max = parallel::detectCores(), step = 1),
+              note(sprintf("На цьому комп'ютері %d ядер. Що більше ядер, то швидше розрахунок, але комп'ютер під час нього працює повільніше. На слабкому комп'ютері поставте 2.", parallel::detectCores())),
+              if (exists("notify_ui")) notify_ui(),
+              tags$hr(),
+              more("Інші параметри розрахунку (лише для перегляду)", tableOutput("settings")))),
+        tags$div(class = "next-bar",
+                 uiOutput("settings_saved", inline = TRUE),
+                 actionButton("back_steps", "Повернутися до кроків", class = "btn-outline-primary"),
+                 actionButton("save_settings", "Зберегти налаштування", class = "btn-primary btn-next"))),
+      # вкладка дашборда лише в нашій інсталяції (файл app/R/dashboard.R у пакет для ЦГЗ не входить)
+      if (exists("dashboard_ui")) dashboard_ui()
+    ))
 )
 
 # ---------------------------------------------------------------- логіка
 server <- function(input, output, session) {
-  rv <- reactiveValues(job = NULL, log = NULL, tick = 0, msg = NULL, data_chk = NULL, tb = NULL, unmatched = NULL)
+  rv <- reactiveValues(job = NULL, log = NULL, tick = 0, msg = NULL, data_chk = NULL, tb = NULL, unmatched = NULL, terr_dirty = FALSE, terr_idx = NULL)
 
   observeEvent(input$create, {
     nm <- safe_name(input$new_name)
@@ -201,23 +261,72 @@ server <- function(input, output, session) {
   # перевірка даних і перелік територій перебудовуються при зміні проєкту, завантаженні або на вимогу
   run_checks <- function() {
     d <- proj_dir(P())
-    chk <- check_datasets(file.path(d, "datasets"))
+    chk <- if (length(dataset_files(file.path(d, "datasets")))) check_datasets(file.path(d, "datasets")) else NULL
     # порожня таблиця означає «перевірено, помилок немає»; NULL означає «ще не перевірялось»
     rv$data_chk <- if (is.null(chk)) msg("", "", "", "", "", "")[0, ] else chk
     rv$tb <- territory_table(d)
-    rv$unmatched <- NULL
+    rv$unmatched <- NULL; rv$terr_dirty <- FALSE
     rv$tick <- rv$tick + 1
   }
   observeEvent(input$project, run_checks())
-  observeEvent(input$check_data, { run_checks(); showNotification("Дані перевірено.", type = "message") })
   terr_chk <- reactive({ if (is.null(rv$tb)) NULL else check_territories(rv$tb) })
 
-  output$status <- renderTable({ refresh(); project_status(P(), rv$data_chk, terr_chk()) }, striped = TRUE, bordered = TRUE)
-  output$status_hint <- renderUI({
-    refresh()
-    if (ready_to_run()) tags$p("Усе на місці: можна запускати розрахунок на вкладці «Розрахунок».")
-    else note("Виправте те, що позначено в таблиці, і збережіть перелік територій.")
+  # ----- кроки: що вже зроблено, смуга етапів, перехід до наступного кроку
+  small_saved <- function(d) {
+    tf <- file.path(d, "territories.csv"); if (!file.exists(tf)) return(FALSE)
+    t <- read.csv(tf, stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = c("", "NA"), check.names = FALSE)
+    if (!any(t$kind == "small", na.rm = TRUE)) return(TRUE)
+    "district_confirm" %in% names(t) && any(!is.na(t$district_confirm[t$kind == "small"]))
+  }
+  has_project <- reactive({ p <- input$project; !is.null(p) && nzchar(p) && dir.exists(proj_dir(p)) })
+  step_done <- reactive({
+    refresh(); rv$tick
+    none <- setNames(rep(FALSE, length(STEPS)), names(STEPS))
+    if (!has_project()) return(none)
+    d <- proj_dir(P())
+    data_ok <- nrow(dataset_table(P())) > 0 && !is.null(rv$data_chk) && n_errors(rv$data_chk) == 0
+    terr_ok <- data_ok && file.exists(file.path(d, "territories.csv")) && n_errors(terr_chk()) == 0 && !isTRUE(rv$terr_dirty)
+    run_ok <- terr_ok && file.exists(file.path(d, "output", "memopt_thresholds.csv"))
+    c(project = TRUE, data = data_ok, terr = terr_ok, run = run_ok, res = run_ok, small = run_ok && small_saved(d))
   })
+  first_undone <- function() { st <- step_done(); k <- names(st)[!st]; if (length(k)) k[1] else "small" }
+  output$stepper <- renderUI({
+    st <- step_done(); cur <- input$tabs
+    tags$div(class = "stepper", lapply(seq_along(STEPS), function(i) {
+      k <- names(STEPS)[i]
+      tags$div(class = paste("step", if (st[[k]]) "done", if (identical(cur, k)) "current"),
+               onclick = sprintf("Shiny.setInputValue('goto', '%s', {priority: 'event'})", k), title = "Відкрити цей крок",
+               tags$div(class = "dot", if (st[[k]] && !identical(cur, k)) "\u2713" else i), tags$div(class = "lbl", STEPS[[k]]))
+    }))
+  })
+  # відкритий або щойно створений проєкт відкривається на першому незробленому кроці
+  observeEvent(input$project, { if (has_project()) nav_select("tabs", first_undone()) }, priority = -10)
+  observeEvent(input$goto, nav_select("tabs", input$goto))
+  for (k in names(STEPS)) local({ kk <- k; observeEvent(input[[paste0("go_", kk)]], nav_select("tabs", kk)) })
+  observeEvent(input$open_settings, nav_select("tabs", "settings"))
+  observeEvent(input$back_steps, nav_select("tabs", first_undone()))
+  next_bar <- function(key, why = NULL) {
+    st <- step_done(); ok <- st[[key]]
+    i <- match(key, names(STEPS)); nk <- names(STEPS)[i + 1]
+    b <- actionButton(paste0("go_", nk), sprintf("Далі: крок %d. %s", i + 1, STEPS[[nk]]), class = paste("btn-next", if (ok) "btn-primary" else "btn-outline-secondary"))
+    if (!ok) b <- tagAppendAttributes(b, disabled = NA)
+    tags$div(class = "next-bar", if (!ok && !is.null(why)) tags$span(class = "why", why), b)
+  }
+  output$proj_name <- renderUI({ if (has_project()) tags$span(class = "proj", paste("Проєкт:", P())) })
+  output$top_buttons <- renderUI({
+    if (has_project() && exists("is_dashboard_project") && is_dashboard_project(proj_dir(P())))
+      actionButton("open_dash", "Дашборд", class = "btn-outline-secondary btn-sm", style = "margin-right:6px")
+  })
+  observeEvent(input$open_dash, nav_select("tabs", "dash"))
+  output$project_info <- renderUI({
+    refresh()
+    if (!has_project()) return(note("Проєктів ще немає: створіть новий ліворуч."))
+    thr <- file.path(proj_dir(P()), "output", "memopt_thresholds.csv")
+    n <- nrow(dataset_table(P()))
+    tagList(tags$p(sprintf("Файлів з рядами: %d.", n)),
+            tags$p(if (file.exists(thr)) paste("Останній розрахунок порогів:", format(file.mtime(thr), "%d.%m.%Y %H:%M")) else "Пороги ще не розраховувались."))
+  })
+  output$next_project <- renderUI(next_bar("project", "Створіть або відкрийте проєкт."))
 
   observeEvent(input$upload_xlsx, {
     f <- input$upload_xlsx; dest <- file.path(proj_dir(P()), "datasets")
@@ -225,21 +334,46 @@ server <- function(input, output, session) {
     showNotification(paste("Збережено", sum(ok), plur(sum(ok), "файл", "файли", "файлів"), "; дані перевірено"), type = "message")
     run_checks()
   })
-  output$datasets <- renderDT({ refresh(); datatable(dataset_table(P()), rownames = FALSE, options = list(dom = "t", pageLength = 50, language = lang(emptyTable = "Файлів ще немає"))) })
-
-  output$data_check_summary <- renderUI({
-    x <- rv$data_chk
-    if (is.null(x)) return(note("Дані ще не перевірялись."))
-    if (!nrow(x)) return(tags$p(class = "text-success", tags$b("Помилок у даних не знайдено.")))
+  output$datasets <- renderDT({
+    refresh()
+    datatable(dataset_table(P()), rownames = FALSE, selection = "single",
+              options = list(dom = "t", pageLength = 50, language = lang(emptyTable = "Файлів ще немає")))
+  })
+  observeEvent(input$del_file, {
+    i <- input$datasets_rows_selected
+    if (!length(i)) { showNotification("Спершу клацніть рядок файлу, який треба видалити.", type = "warning"); return() }
+    f <- dataset_table(P())$Файл[i]
+    file.remove(file.path(proj_dir(P()), "datasets", f)); run_checks()
+    showNotification(paste0("Файл «", f, "» видалено з проєкту."), type = "message")
+  })
+  output$data_summary <- renderUI({
+    refresh(); x <- rv$data_chk; n <- nrow(dataset_table(P()))
+    if (!n) return(NULL)
+    if (is.null(x)) return(NULL)
     e <- sum(x$Рівень == "помилка"); w <- sum(x$Рівень == "увага")
-    if (!e && !w) return(tags$p(class = "text-success", tags$b("Помилок у даних не знайдено."), " Нижче лише довідкові повідомлення."))
-    tags$p(tags$b(sprintf("%d %s і %d %s.", e, plur(e, "помилка", "помилки", "помилок"), w, plur(w, "попередження", "попередження", "попереджень"))),
-           " Помилки треба виправити у файлах Excel і завантажити їх знову; попередження варто переглянути; довідка лише пояснює, що програма робить з даними.")
+    if (e) return(box(NULL, cls = "bad", tags$p(class = "bad-line", sprintf("У даних %d %s.", e, plur(e, "помилка", "помилки", "помилок"))),
+                      tags$p("Список нижче показує файл, аркуш і клітинку кожної помилки та що з нею зробити. Виправте помилки в Excel і завантажте ці файли знову: файл з тією самою назвою замінить старий.")))
+    box(NULL, cls = if (w) "warn" else "good",
+        tags$p(class = "ok-line", sprintf("Файлів: %d. Помилок у даних немає.", n)),
+        if (w) tags$p(sprintf("Є %d %s: розрахунку вони не заважають, але їх варто переглянути (список нижче).", w, plur(w, "зауваження", "зауваження", "зауважень"))))
+  })
+  output$data_errors <- renderUI({
+    x <- rv$data_chk
+    if (is.null(x) || !nrow(x)) return(NULL)
+    main <- x[x$Рівень != "довідка", , drop = FALSE]; info <- x[x$Рівень == "довідка", , drop = FALSE]
+    box(if (nrow(main)) "Що виправити або переглянути" else NULL,
+        if (nrow(main)) DTOutput("data_check"),
+        if (nrow(info)) more(sprintf("Як програма обробила дані (%d %s)", nrow(info), plur(nrow(info), "повідомлення", "повідомлення", "повідомлень")), tableOutput("data_info")))
   })
   output$data_check <- renderDT({
-    x <- rv$data_chk; if (is.null(x) || !nrow(x)) x <- data.frame(Повідомлення = "Помилок немає")
-    datatable(x, rownames = FALSE, options = list(pageLength = 25, language = lang(emptyTable = "Помилок немає"))) |>
-      (\(d) if ("Рівень" %in% names(x)) formatStyle(d, "Рівень", color = styleEqual(c("помилка", "увага", "довідка"), c("#B83227", "#9A6700", "#5b6573")), fontWeight = "bold") else d)()
+    x <- rv$data_chk; req(x); x <- x[x$Рівень != "довідка", , drop = FALSE]
+    datatable(x, rownames = FALSE, selection = "none", options = list(pageLength = 25, language = lang())) |>
+      formatStyle("Рівень", color = styleEqual(c("помилка", "увага"), c("#B83227", "#9A6700")), fontWeight = "bold")
+  })
+  output$data_info <- renderTable({ x <- rv$data_chk; req(x); x[x$Рівень == "довідка", -1, drop = FALSE] }, striped = TRUE)
+  output$next_data <- renderUI({
+    refresh(); n <- nrow(dataset_table(P()))
+    next_bar("data", if (!n) "Завантажте файли з рядами." else "Виправте помилки в даних і завантажте файли знову.")
   })
 
   # зауваження з останнього розрахунку (аркуш «Перевірка даних» книги результатів)
@@ -251,59 +385,99 @@ server <- function(input, output, session) {
     if (is.null(x) || !"Примітка" %in% names(x)) return(NULL)
     x[!is.na(x$Примітка) & nzchar(x$Примітка) & x$Примітка != "сезон відсікається автоматично", , drop = FALSE]
   })
-  output$flags_summary <- renderUI({
-    x <- flags()
-    if (is.null(x)) return(note("Зауваження з'являться після першого розрахунку на вкладці «Розрахунок»."))
-    if (!nrow(x)) return(tags$p(class = "text-success", tags$b("Сезонів, які варто переглянути, немає.")))
-    tags$p(tags$b(sprintf("%d %s, які варто переглянути.", nrow(x), plur(nrow(x), "сезон", "сезони", "сезонів"))))
-  })
   output$flags <- renderDT({
     x <- flags(); req(x, nrow(x))
     v <- data.frame(Територія = x$Назва, Сезон = x$Сезон, `Що помічено` = x$Примітка,
                     `Нульових тижнів` = x$`Нульових тижнів`, `Пропущених тижнів` = x$`Пропущено тижнів усередині сезону`,
                     `Пік порівняно зі звичним, разів` = round(x$`Пік до звичного піку`, 2), check.names = FALSE)
-    datatable(v, rownames = FALSE, options = list(pageLength = 25, language = lang())) |>
+    datatable(v, rownames = FALSE, selection = "none", options = list(pageLength = 10, language = lang())) |>
       formatRound("Пік порівняно зі звичним, разів", digits = 2, dec.mark = ",")
   })
 
   # ----- території
-  show_cols <- c("Назва", "Тип", "Вид громади", "Район", "Населення", "Файл", "Аркуш", "Сезонів")
+  # «Перевірка» в першій колонці позначає рядки з помилками; таблицю можна звузити до них, тому рядки таблиці
+  # зіставляються з рядками переліку через rv$terr_idx
+  show_cols <- c("Перевірка", "Назва", "Тип", "Вид громади", "Район", "Населення", "Файл", "Аркуш", "Сезонів")
+  bad_names <- reactive({ x <- terr_chk(); if (is.null(x)) character(0) else unique(x$Територія[x$Рівень == "помилка" & nzchar(x$Територія)]) })
   output$terr_table <- renderDT({
     req(rv$tb)
-    datatable(rv$tb[, show_cols], rownames = FALSE, selection = "none",
-              editable = list(target = "cell", disable = list(columns = c(5, 6, 7))),
-              options = list(pageLength = 25, language = lang(search = "Пошук:", emptyTable = "Аркушів немає: завантажте дані")))
+    tb <- rv$tb; tb$Перевірка <- ifelse(tb$Назва %in% bad_names(), "виправити", "")
+    tb$Тип[is.na(tb$Тип)] <- ""
+    # які саме клітинки треба заповнити (приховані колонки для підсвічування)
+    h <- tb$Тип == "громада"; districts <- tb$Назва[tb$Тип == "район"]
+    tb$.t <- as.integer(!(tb$Тип %in% TYPES))
+    tb$.k <- as.integer(h & !(tb$`Вид громади` %in% HKINDS))
+    tb$.r <- as.integer(h & (is.na(tb$Район) | !(tb$Район %in% districts)))
+    tb$.p <- as.integer(h & (is.na(tb$Населення) | tb$Населення <= 0))
+    idx <- if (isTRUE(input$terr_only_bad)) which(nzchar(tb$Перевірка)) else seq_len(nrow(tb))
+    rv$terr_idx <- idx
+    pink <- styleEqual(1, "#fbd5d1")
+    datatable(tb[idx, c(show_cols, ".t", ".k", ".r", ".p")], rownames = FALSE, selection = "none",
+              editable = list(target = "cell", disable = list(columns = c(0, 6:12))),
+              options = list(pageLength = 100, columnDefs = list(list(visible = FALSE, targets = 9:12)),
+                             language = lang(search = "Пошук:", emptyTable = "Аркушів немає: завантажте дані на кроці 2"))) |>
+      formatStyle("Перевірка", color = "#B83227", fontWeight = "bold") |>
+      formatStyle("Тип", ".t", backgroundColor = pink) |> formatStyle("Вид громади", ".k", backgroundColor = pink) |>
+      formatStyle("Район", ".r", backgroundColor = pink) |> formatStyle("Населення", ".p", backgroundColor = pink)
   })
   observeEvent(input$terr_table_cell_edit, {
     e <- input$terr_table_cell_edit
+    row <- rv$terr_idx[e$row]
     col <- show_cols[e$col + 1]; v <- trimws(as.character(e$value))
     if (col == "Населення") v <- suppressWarnings(as.numeric(gsub("[ ,]", "", v)))
-    if (col == "Тип" && !(v %in% TYPES)) showNotification(paste("Тип має бути одним із:", paste(TYPES, collapse = ", ")), type = "warning")
+    if (col == "Тип") { v <- tolower(v); if (!(v %in% TYPES)) showNotification(paste("Тип має бути одним із:", paste(TYPES, collapse = ", ")), type = "warning") }
     if (col == "Вид громади") { v <- tolower(v); if (!(v %in% HKINDS)) showNotification(paste("Вид громади має бути одним із:", paste(HKINDS, collapse = ", ")), type = "warning") }
-    if (col == "Тип" && v == "громада" && is.na(rv$tb$`Вид громади`[e$row])) rv$tb$`Вид громади`[e$row] <- guess_kind_of_hromada(rv$tb$Назва[e$row])
-    tb <- rv$tb; tb[e$row, col] <- v; rv$tb <- tb
+    if (col == "Тип" && v == "громада" && is.na(rv$tb$`Вид громади`[row])) rv$tb$`Вид громади`[row] <- guess_kind_of_hromada(rv$tb$Назва[row])
+    tb <- rv$tb; tb[row, col] <- v; rv$tb <- tb; rv$terr_dirty <- TRUE
   })
   observeEvent(input$upload_pop, {
     r <- tryCatch(apply_population(rv$tb, input$upload_pop$datapath), error = function(e) NULL)
-    if (is.null(r)) { showNotification("Файл не вдалося прочитати: потрібні колонки назва і населення.", type = "error"); return() }
-    rv$tb <- r$tb; rv$unmatched <- r$unmatched
+    if (is.null(r)) { showNotification("Файл не вдалося прочитати: у першій колонці мають бути назви громад, у другій населення.", type = "error"); return() }
+    rv$tb <- r$tb; rv$unmatched <- r$unmatched; rv$terr_dirty <- TRUE
     showNotification("Населення додано. Не забудьте зберегти перелік територій.", type = "message")
   })
   output$pop_unmatched <- renderUI({
     u <- rv$unmatched
     if (is.null(u) || !nrow(u)) return(NULL)
-    tagList(tags$p(class = "text-danger", sprintf("%d %s з файлу не знайдено в переліку територій:", nrow(u), plur(nrow(u), "назва", "назви", "назв"))), renderTable(u))
+    tagList(tags$p(class = "bad-line", sprintf("%d %s з файлу не знайдено в переліку територій. Виправте назву у файлі так, як вона записана в колонці «Назва», і завантажте файл знову.",
+                                               nrow(u), plur(nrow(u), "назву", "назви", "назв"))), renderTable(u))
   })
+  output$terr_problems <- renderUI({
+    x <- terr_chk(); if (is.null(rv$tb) || !nrow(rv$tb)) return(NULL)
+    if (is.null(x) || !nrow(x)) return(box(NULL, cls = "good", tags$p(class = "ok-line", "У переліку територій помилок немає.")))
+    e <- sum(x$Рівень == "помилка")
+    box(if (e) sprintf("Що треба виправити: %d %s", e, plur(e, "помилка", "помилки", "помилок")) else "Варто звернути увагу",
+        cls = if (e) "bad" else "warn",
+        if (e) tags$p("Рядки з помилками позначено в таблиці переліку словом «виправити», а клітинки, які треба заповнити, підсвічено. Щоб бачити лише ці рядки, увімкніть позначку над таблицею."),
+        DTOutput("terr_check"))
+  })
+  # однакові помилки різних територій одним рядком: скільки їх і які території
   output$terr_check <- renderDT({
-    x <- terr_chk(); if (is.null(x)) x <- data.frame(Повідомлення = "Помилок немає")
-    datatable(x, rownames = FALSE, options = list(dom = "tp", pageLength = 10, language = lang(emptyTable = "Помилок немає")))
+    x <- terr_chk(); req(x)
+    key <- paste(x$Рівень, x$`Що не так`, x$`Як виправити`, sep = "\r")
+    g <- do.call(rbind, lapply(unique(key), function(k) {
+      r <- x[key == k, ]; nm <- r$Територія[nzchar(r$Територія)]
+      data.frame(Рівень = r$Рівень[1], `Що не так` = r$`Що не так`[1], Скільки = nrow(r),
+                 Території = paste0(paste(head(nm, 4), collapse = ", "), if (length(nm) > 4) sprintf(" і ще %d", length(nm) - 4) else ""),
+                 `Як виправити` = r$`Як виправити`[1], check.names = FALSE)
+    }))
+    datatable(g, rownames = FALSE, selection = "none", options = list(dom = "t", pageLength = 50, language = lang())) |>
+      formatStyle("Рівень", color = styleEqual(c("помилка", "увага"), c("#B83227", "#9A6700")), fontWeight = "bold")
+  })
+  output$terr_state <- renderUI({
+    refresh()
+    saved <- file.exists(file.path(proj_dir(P()), "territories.csv")); e <- n_errors(terr_chk())
+    if (e) tags$p(class = "bad-line", sprintf("Спершу виправте %d %s (список нижче), потім збережіть.", e, plur(e, "помилку", "помилки", "помилок")))
+    else if (isTRUE(rv$terr_dirty) || !saved) tags$p("Помилок немає. Натисніть кнопку, щоб зберегти перелік.")
+    else tags$p(class = "ok-line", "Перелік територій збережено.")
   })
   observeEvent(input$save_terr, {
     x <- terr_chk()
-    if (n_errors(x)) { showNotification("Спершу виправте помилки в переліку територій (таблиця під ним).", type = "error"); return() }
-    write_territories(rv$tb, proj_dir(P())); rv$tb <- territory_table(proj_dir(P()))
+    if (n_errors(x)) { showNotification("Спершу виправте помилки в переліку територій (список над таблицею).", type = "error"); return() }
+    write_territories(rv$tb, proj_dir(P())); rv$tb <- territory_table(proj_dir(P())); rv$terr_dirty <- FALSE
     showNotification("Перелік територій збережено.", type = "message"); rv$tick <- rv$tick + 1
   })
+  output$next_terr <- renderUI(next_bar("terr", "Виправте помилки в переліку і натисніть «Зберегти перелік територій»."))
 
   # ----- розрахунок
   ready_to_run <- reactive({
@@ -313,7 +487,7 @@ server <- function(input, output, session) {
   })
   output$run_ready <- renderUI({
     refresh()
-    if (ready_to_run()) tags$p(paste0("Проєкт «", P(), "» готовий до розрахунку.")) else tags$p(class = "text-danger", "Бракує даних або є помилки: див. вкладку «Проєкт».")
+    if (ready_to_run()) tags$p("Усе готово до розрахунку.") else tags$p(class = "bad-line", "Спершу пройдіть кроки 2 і 3: завантажте дані без помилок і збережіть перелік територій.")
   })
   observeEvent(input$run, {
     if (!is.null(rv$job) && rv$job$is_alive()) { showNotification("Розрахунок уже йде.", type = "warning"); return() }
@@ -361,7 +535,7 @@ server <- function(input, output, session) {
                                               style = sprintf("width:%d%%", max(pct, 3)), sprintf("%d%%", pct))),
         note(paste0("Минуло ", mmss(el), left, ".", if (is.na(prev)) " Після першого розрахунку програма запам'ятає його тривалість і показуватиме, скільки лишилось." else ""))))
     }
-    if (identical(rv$msg, "done")) tags$p(class = "text-success", tags$b("Готово. Результати на вкладках «Результати» і «Громади з малою кількістю випадків»."))
+    if (identical(rv$msg, "done")) tags$p(class = "text-success", tags$b("Готово. Пороги розраховано: перейдіть до кроку 5."))
     else {
       # непередбачена помилка: показати її людською мовою і дати зберегти журнал для розробника
       lg <- if (!is.null(rv$log) && file.exists(rv$log)) readLines(rv$log, warn = FALSE, encoding = "UTF-8") else character(0)
@@ -372,6 +546,7 @@ server <- function(input, output, session) {
               downloadButton("dl_log", "Зберегти журнал розрахунку"))
     }
   })
+  output$next_run <- renderUI(next_bar("run", "Дочекайтеся завершення розрахунку."))
   output$dl_log <- downloadHandler(filename = function() paste0("memopt_журнал_", P(), ".txt"), content = function(file) file.copy(rv$log, file))
 
   # ----- результати
@@ -381,6 +556,14 @@ server <- function(input, output, session) {
     if (!file.exists(f)) return(NULL)
     read.csv(f, stringsAsFactors = FALSE, encoding = "UTF-8")
   })
+  output$flags_box <- renderUI({
+    if (is.null(thr())) return(box(NULL, cls = "warn", tags$p("Результатів ще немає: розрахуйте пороги на кроці 4.")))
+    x <- flags(); if (is.null(x) || !nrow(x)) return(NULL)
+    box(sprintf("Сезони, які варто перевірити в даних: %d", nrow(x)), cls = "warn",
+        tags$p("Ці сезони помітно відрізняються від звичних для території: багато нульових чи пропущених тижнів або пік, утричі вищий чи нижчий за звичайний. Це не помилки, такі сезони беруться в розрахунок. Перевірте в Excel, чи правильно внесено дані. Якщо сезон справді зіпсований, виключіть його в налаштуваннях (кнопка вгорі праворуч) і розрахуйте пороги заново."),
+        DTOutput("flags"))
+  })
+  output$next_res <- renderUI(next_bar("res", "Спершу розрахуйте пороги на кроці 4."))
   output$thresholds <- renderDT({
     t <- thr()
     if (is.null(t)) return(datatable(data.frame(Повідомлення = "Результатів ще немає: запустіть розрахунок."), rownames = FALSE, options = list(dom = "t", language = lang())))
@@ -416,8 +599,8 @@ server <- function(input, output, session) {
     rt <- rule_now()
     if (is.null(rt)) return(note("Список з'явиться після розрахунку порогів для громад."))
     n <- sum(rt$by_rule | rt$manual)
-    tags$p(tags$span(class = "rule-num", n), " ", plur(n, "громада", "громади", "громад"), " з ", nrow(rt), ": ",
-           sum(rt$by_rule), " через малу кількість випадків, ", sum(rt$manual & !rt$by_rule), " додано вручну.")
+    tags$p(tags$span(class = "rule-num", n), sprintf(" %s з %d: %d через малу кількість випадків, %d позначено вручну.", plur(n, "громада", "громади", "громад"), nrow(rt),
+           sum(rt$by_rule), sum(rt$manual & !rt$by_rule)))
   })
   output$rule_list <- renderDT({
     rt <- rule_now(); req(rt)
@@ -426,7 +609,9 @@ server <- function(input, output, session) {
                     Позначено = ifelse(rt$by_rule, "так, мало випадків", ifelse(rt$manual, "так, додано вручну", "ні")), check.names = FALSE)
     datatable(v[order(v$Позначено == "ні", v$`Середній поріг, випадків на тиждень`), ], rownames = FALSE,
               options = list(pageLength = 15, language = lang(search = "Пошук:"))) |>
-      formatStyle("Позначено", color = styleEqual(c("ні"), c("#5b6573"), default = "#17345E"), fontWeight = "bold")
+      formatStyle("Позначено", color = styleEqual(c("ні"), c("#5b6573"), default = "#17345E"), fontWeight = "bold") |>
+      formatRound(c("Середній поріг на 100 тис.", "Середній поріг, випадків на тиждень"), digits = 1, dec.mark = ",", mark = " ") |>
+      formatRound("Населення", digits = 0, mark = " ")
   })
   output$rule_sens <- renderTable({
     rt <- rule_now(); req(rt)
@@ -447,7 +632,15 @@ server <- function(input, output, session) {
     on <- rt$id[rt$by_rule | rt$manual]
     terr$district_confirm <- ifelse(terr$kind == "small", ifelse(terr[[1]] %in% on, "так", "ні"), NA)
     write.csv(terr, tf, row.names = FALSE, na = "", fileEncoding = "UTF-8")
-    showNotification(sprintf("Збережено: позначено %d %s.", length(on), plur(length(on), "громада", "громади", "громад")), type = "message")
+    showNotification(sprintf("Збережено: позначено %d %s.", length(on), plur(length(on), "громада", "громади", "громад")), type = "message"); rv$tick <- rv$tick + 1
+  })
+
+  output$next_small <- renderUI({
+    st <- step_done()
+    if (st[["small"]]) return(box("Усе зроблено", cls = "good",
+      tags$p("Пороги розраховано, громади з малою кількістю випадків збережено. Книгу результатів і таблицю порогів можна завантажити на кроці 5."),
+      tags$p("Щороку після 20-го тижня, коли сезон завершився, допишіть його колонку в ряди, завантажте файли на кроці 2 і розрахуйте пороги заново.")))
+    tags$div(class = "next-bar", tags$span(class = "why", if (st[["run"]]) "Перевірте позначені громади і натисніть «Зберегти»." else "Спершу розрахуйте пороги на кроці 4."))
   })
 
   output$settings <- renderTable({

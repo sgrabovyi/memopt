@@ -33,7 +33,8 @@ threshold_season <- function(proj) {
 etl_season <- function(d) tryCatch(jsonlite::fromJSON(file.path(d, "config.json"))$thresholds$current_season, error = function(e) NA_character_)
 
 dashboard_ui <- function() {
-  nav_panel("Дашборд", value = "dash",
+  nav_panel_hidden("dash",
+    tags$div(class = "step-head", tags$h4("Дашборд Сумської області")),
     layout_columns(col_widths = c(5, 7),
       card(card_header("Пороги в дашборді Сумської області"),
            textInput("etl_dir", "Папка ETL дашборда", placeholder = "наприклад C:\\...\\Dashboard GRVI\\GRVI_Dashboard_ETL"),
@@ -54,7 +55,6 @@ dashboard_ui <- function() {
 dashboard_server <- function(input, output, session, P, rv) {
   observeEvent(input$project, {
     show <- is_dashboard_project(proj_dir(P()))
-    if (show) nav_show("tabs", "dash") else nav_hide("tabs", "dash")
     cfg <- read_cfg(P())
     updateTextInput(session, "etl_dir", value = if (is.null(cfg$dashboard$etl_dir)) "" else cfg$dashboard$etl_dir)
   })
