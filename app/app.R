@@ -198,7 +198,7 @@ ui <- page(
                      downloadButton("dl_xlsx", "Книга результатів (Excel)", class = "btn-primary"),
                      downloadButton("dl_csv", "Таблиця порогів (CSV)", class = "btn-outline-primary"),
                      radioButtons("res_kind", NULL, c("Усі території" = "all", "Основні території" = "основна", "Громади" = "мала"), inline = TRUE)),
-            note("Що на якому аркуші книги результатів, пояснено в docs\\ЗВІТ_аналіз_книги_результатів.docx."),
+            note("Для щоденної роботи в книзі результатів досить трьох аркушів: «Пороги», «Зміни порогів» і «Перевірка даних». Що на решті аркушів, коротко сказано на першому аркуші книги, «Зміст», а докладніше в документі docs\\Як_читати_книгу_результатів.docx."),
             DTOutput("thresholds")),
         uiOutput("next_res")),
       nav_panel_hidden("small",
@@ -411,10 +411,8 @@ server <- function(input, output, session) {
   output$flags <- renderDT({
     x <- flags(); req(x, nrow(x))
     v <- data.frame(Територія = x$Назва, Сезон = x$Сезон, `Що помічено` = x$Примітка,
-                    `Нульових тижнів` = x$`Нульових тижнів`, `Пропущених тижнів` = x$`Пропущено тижнів усередині сезону`,
-                    `Пік порівняно зі звичним, разів` = round(x$`Пік до звичного піку`, 2), check.names = FALSE)
-    datatable(v, rownames = FALSE, selection = "none", options = list(pageLength = 10, language = lang())) |>
-      formatRound("Пік порівняно зі звичним, разів", digits = 2, dec.mark = ",")
+                    `Тижнів без випадків` = x$`Нульових тижнів`, `Пропущених тижнів` = x$`Пропущено тижнів усередині сезону`, check.names = FALSE)
+    datatable(v, rownames = FALSE, selection = "none", options = list(pageLength = 10, language = lang()))
   })
 
   # ----- території
