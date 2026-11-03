@@ -15,7 +15,6 @@ FILES = [
     ("app/app.R", "app/app.R"), ("app/R/project.R", "app/R/project.R"), ("app/R/data_checks.R", "app/R/data_checks.R"), ("app/R/territories.R", "app/R/territories.R"),
     ("templates/series_template.xlsx", "templates/series_template.xlsx"), ("templates/territories_template.csv", "templates/territories_template.csv"),
     ("docs/ПОСІБНИК_користувача.docx", "docs/ПОСІБНИК_користувача.docx"),
-    ("docs/Як_читати_книгу_результатів.docx", "docs/Як_читати_книгу_результатів.docx"),
 ]
 
 def strip_export(core):
