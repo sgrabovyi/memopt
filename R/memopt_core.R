@@ -894,7 +894,7 @@ mo_run <- function(cfg_path) {
   if (length(auto)) cat("  Увага: сезони", paste0(auto, " (", MO_AUTO_EXCLUDE[auto], ")", collapse = ", "), "відсічено автоматично, вони не придатні для порогів\n")
   checks <- mo_check_inputs(cfg, terr)
   nflag <- sum(nzchar(checks$note) & !grepl("^сезон відсікається автоматично$", checks$note))
-  if (nflag) cat(sprintf("  У даних є сезони, які варто переглянути: %d. Перелік на вкладці «Перевірка даних» і в книзі результатів, аркуш «%s».\n", nflag, MO_SHEETS$input_check))
+  if (nflag) cat(sprintf("  Незвичних сезонів у даних територій: %d (багато нульових чи пропущених тижнів або пік, утричі вищий чи нижчий за звичний). Розрахунку це не заважає, ці сезони беруться в розрахунок. Перелік буде в застосунку на кроці «Результати» і в книзі результатів на аркуші «%s»: перевірте, чи правильно внесено ці дані.\n", nflag, MO_SHEETS$input_check))
   cfg$.season_sets <- NULL
   ser <- list()
   for (i in seq_len(nrow(terr))) ser[[terr$id[i]]] <- mo_series(terr[i, ], cfg, log, all_seasons = TRUE)
