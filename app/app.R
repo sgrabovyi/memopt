@@ -103,7 +103,19 @@ ui <- page(
     .progress { height:24px; font-size:13px; margin:8px 0; }
     table.names td, table.names th { padding:3px 10px; }
     .shiny-input-container { width:100% !important; }
-    .shiny-file-input-progress .progress-bar { font-size:0; }"))),
+    .shiny-file-input-progress .progress-bar { font-size:0; }
+    #busy { position:fixed; inset:0; background:rgba(244,246,249,.6); z-index:2000; display:none; align-items:center; justify-content:center; }
+    #busy.on { display:flex; }
+    #busy .msg { background:#fff; border-radius:10px; padding:18px 26px; box-shadow:0 2px 10px rgba(0,0,0,.15); font-size:16px; color:#17345E; display:flex; gap:12px; align-items:center; }
+    #busy .spin { width:22px; height:22px; border:3px solid #d6e0ee; border-top-color:#17345E; border-radius:50%; animation:spin 0.8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }"))),
+  tags$div(id = "busy", tags$div(class = "msg", tags$div(class = "spin"), "Зачекайте, програма працює")),
+  tags$script(HTML("
+    var busyT = null;
+    $(document).on('shiny:busy', function() { if (!busyT) busyT = setTimeout(function() { $('#busy').addClass('on'); }, 500); });
+    $(document).on('shiny:idle', function() { clearTimeout(busyT); busyT = null; $('#busy').removeClass('on'); });
+    // після натискання кнопки сторінка блідне одразу, щоб не натискали вдруге
+    $(document).on('click', '.btn', function() { if (!$(this).is('.btn-next, .btn-file')) $('#busy').addClass('on'); setTimeout(function() { if (!busyT) $('#busy').removeClass('on'); }, 800); });")),
   tags$script(HTML("
     $(document).on('change', 'input[type=file]', function() {
       var n = this.files.length, t = $(this).closest('.input-group').find('input[type=text]');
@@ -159,7 +171,8 @@ ui <- page(
               uiOutput("pop_unmatched"),
               more("Навіщо населення",
                    tags$p("Населення потрібне лише для того, щоб перевести поріг громади з показника на 100 тис. у кількість випадків на тиждень і знайти громади, де випадків замало (крок 6). Тому досить одного числа, останнього відомого населення. Показники на 100 тис. у самих рядах рахуються ще до завантаження в застосунок, з населенням відповідного року."),
-                   tags$p("Населення можна також вписати в колонку «Населення» таблиці вручну."))),
+                   tags$p("Населення можна також вписати в колонку «Населення» таблиці вручну."),
+                   tags$p("Окремого населення для кожного року не потрібно. Коли з'являться новіші дані про населення, перед черговим розрахунком завантажте новий файл: він замінить старі числа."))),
           box(tagList(tags$span(class = "num", "3"), "Збережіть перелік"), cls = "action",
               uiOutput("terr_state"),
               actionButton("save_terr", "Зберегти перелік територій", class = "btn-primary"))),
@@ -408,7 +421,14 @@ server <- function(input, output, session) {
   # «Перевірка» в першій колонці позначає рядки з помилками; таблицю можна звузити до них, тому рядки таблиці
   # зіставляються з рядками переліку через rv$terr_idx
   show_cols <- c("Перевірка", "Назва", "Тип", "Вид громади", "Район", "Населення", "Файл", "Аркуш", "Сезонів")
-  bad_names <- reactive({ x <- terr_chk(); if (is.null(x)) character(0) else unique(x$Територія[x$Рівень == "помилка" & nzchar(x$Територія)]) })
+  # поки файл з населенням не завантажено, район і населення громад порожні: ці помилки не показуються, замість них одне нагадування
+  pop_loaded <- reactive({ tb <- rv$tb; !is.null(tb) && any(!is.na(tb$Населення[tb$Тип %in% "громада"])) })
+  shown_chk <- reactive({
+    x <- terr_chk(); if (is.null(x) || pop_loaded()) return(x)
+    x <- x[!(x$`Що не так` %in% c("не вказано населення громади", "не вказано район громади")), , drop = FALSE]
+    if (nrow(x)) x else NULL
+  })
+  bad_names <- reactive({ x <- shown_chk(); if (is.null(x)) character(0) else unique(x$Територія[x$Рівень == "помилка" & nzchar(x$Територія)]) })
   output$terr_table <- renderDT({
     req(rv$tb)
     tb <- rv$tb; tb$Перевірка <- ifelse(tb$Назва %in% bad_names(), "виправити", "")
@@ -417,8 +437,8 @@ server <- function(input, output, session) {
     h <- tb$Тип == "громада"; districts <- tb$Назва[tb$Тип == "район"]
     tb$.t <- as.integer(!(tb$Тип %in% TYPES))
     tb$.k <- as.integer(h & !(tb$`Вид громади` %in% HKINDS))
-    tb$.r <- as.integer(h & (is.na(tb$Район) | !(tb$Район %in% districts)))
-    tb$.p <- as.integer(h & (is.na(tb$Населення) | tb$Населення <= 0))
+    tb$.r <- as.integer(h & pop_loaded() & (is.na(tb$Район) | !(tb$Район %in% districts)))
+    tb$.p <- as.integer(h & pop_loaded() & (is.na(tb$Населення) | tb$Населення <= 0))
     idx <- if (isTRUE(input$terr_only_bad)) which(nzchar(tb$Перевірка)) else seq_len(nrow(tb))
     rv$terr_idx <- idx
     pink <- styleEqual(1, "#fbd5d1")
@@ -453,17 +473,19 @@ server <- function(input, output, session) {
                                                nrow(u), plur(nrow(u), "назву", "назви", "назв"))), renderTable(u))
   })
   output$terr_problems <- renderUI({
-    x <- terr_chk(); if (is.null(rv$tb) || !nrow(rv$tb)) return(NULL)
-    if (is.null(x) || !nrow(x)) return(box(NULL, cls = "good", tags$p(class = "ok-line", "У переліку територій помилок немає.")))
+    x <- shown_chk(); if (is.null(rv$tb) || !nrow(rv$tb)) return(NULL)
+    nopop <- if (!pop_loaded() && any(rv$tb$Тип %in% "громада")) box(NULL, cls = "warn",
+      tags$p(tags$b("Ще не завантажено файл з населенням громад."), " Завантажте його в пункті 2 угорі. З нього програма візьме населення і район кожної громади, після цього тут буде видно, чи лишилось щось виправити."))
+    if (is.null(x) || !nrow(x)) return(if (!is.null(nopop)) nopop else box(NULL, cls = "good", tags$p(class = "ok-line", "У переліку територій помилок немає.")))
     e <- sum(x$Рівень == "помилка")
     box(if (e) sprintf("Що треба виправити: %d %s", e, plur(e, "помилка", "помилки", "помилок")) else "Варто звернути увагу",
         cls = if (e) "bad" else "warn",
         if (e) tags$p("Рядки з помилками позначено в таблиці переліку словом «виправити», а клітинки, які треба заповнити, підсвічено. Щоб бачити лише ці рядки, увімкніть позначку над таблицею."),
-        DTOutput("terr_check"))
+        DTOutput("terr_check"), nopop)
   })
   # однакові помилки різних територій одним рядком: скільки їх і які території
   output$terr_check <- renderDT({
-    x <- terr_chk(); req(x)
+    x <- shown_chk(); req(x)
     key <- paste(x$Рівень, x$`Що не так`, x$`Як виправити`, sep = "\r")
     g <- do.call(rbind, lapply(unique(key), function(k) {
       r <- x[key == k, ]; nm <- r$Територія[nzchar(r$Територія)]
@@ -476,8 +498,9 @@ server <- function(input, output, session) {
   })
   output$terr_state <- renderUI({
     refresh()
-    saved <- file.exists(file.path(proj_dir(P()), "territories.csv")); e <- n_errors(terr_chk())
-    if (e) tags$p(class = "bad-line", sprintf("Спершу виправте %d %s (список нижче), потім збережіть.", e, plur(e, "помилку", "помилки", "помилок")))
+    saved <- file.exists(file.path(proj_dir(P()), "territories.csv")); e <- n_errors(shown_chk())
+    if (!pop_loaded() && any(rv$tb$Тип %in% "громада")) tags$p("Спершу завантажте файл з населенням громад (пункт 2).")
+    else if (e) tags$p(class = "bad-line", sprintf("Спершу виправте %d %s (список нижче), потім збережіть.", e, plur(e, "помилку", "помилки", "помилок")))
     else if (isTRUE(rv$terr_dirty) || !saved) tags$p("Помилок немає. Натисніть кнопку, щоб зберегти перелік.")
     else tags$p(class = "ok-line", "Перелік територій збережено.")
   })

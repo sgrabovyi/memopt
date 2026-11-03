@@ -143,7 +143,7 @@ check_datasets <- function(dir) {
   sig <- character(0); sig_where <- character(0)
   pop <- vapply(files, is_population_file, logical(1))
   for (f in files[pop]) res[[length(res) + 1]] <- msg("помилка", basename(f), "", "", "це файл з населенням громад, а не ряди захворюваності",
-                                                     "Видаліть його тут (клацніть рядок файлу і натисніть «Видалити позначений файл») і завантажте на кроці 3, «Території»")
+                                                     "У таблиці «Файли проєкту» вище клацніть рядок цього файлу і натисніть кнопку «Видалити позначений файл» під таблицею. Потім завантажте цей файл на кроці 3, «Території»")
   for (f in files[!pop]) for (s in tryCatch(readxl::excel_sheets(f), error = function(e) character(0))) {
     res[[length(res) + 1]] <- check_sheet(f, s)
     # однакові дані на різних аркушах: зазвичай аркуш території скопійовано з іншого
