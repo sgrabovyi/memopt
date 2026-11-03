@@ -55,7 +55,7 @@ rule_table <- function(p) {
 theme <- bs_theme(version = 5, primary = "#17345E", secondary = "#0076be", base_font = font_collection("Segoe UI", "Arial", "sans-serif"))
 note <- function(...) tags$p(class = "muted", ...)
 more <- function(title, ...) tags$details(class = "more", tags$summary(title), tags$div(class = "more-body", ...))
-STEPS <- c(project = "Проєкт", data = "Дані", terr = "Території", run = "Розрахунок", res = "Результати", small = "Громади з малою кількістю випадків")
+STEPS <- c(project = "Проєкт", data = "Дані", terr = "Території", run = "Розрахунок", small = "Громади з малою кількістю випадків", res = "Результати")
 step_head <- function(key, what) tags$div(class = "step-head", tags$h4(sprintf("Крок %d. %s", match(key, names(STEPS)), STEPS[[key]])), tags$p(class = "lead-what", what))
 box <- function(title, ..., cls = "") tags$div(class = paste("box", cls), if (!is.null(title)) tags$h6(class = "box-title", title), ...)
 SHEET_NAMES <- tags$table(class = "table table-sm names",
@@ -189,18 +189,18 @@ ui <- page(
               actionButton("run", "Розрахувати пороги", class = "btn-primary btn-lg"),
               uiOutput("run_state")),
           box("Журнал розрахунку", div(class = "log-box", textOutput("log")))),
+        uiOutput("flags_box"),
         uiOutput("next_run")),
       nav_panel_hidden("res",
-        step_head("res", "Перегляньте пороги і збережіть книгу результатів. Спершу подивіться сезони, які варто перевірити в даних."),
-        uiOutput("flags_box"),
+        step_head("res", "Завантажте книгу результатів. У ній пороги всіх територій і позначені громади з малою кількістю випадків."),
+        uiOutput("res_state"),
         box("Пороги на 100 тис. населення за тиждень",
             tags$div(style = "display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px",
                      downloadButton("dl_xlsx", "Книга результатів (Excel)", class = "btn-primary"),
                      downloadButton("dl_csv", "Таблиця порогів (CSV)", class = "btn-outline-primary"),
                      radioButtons("res_kind", NULL, c("Усі території" = "all", "Основні території" = "основна", "Громади" = "мала"), inline = TRUE)),
             note("Для щоденної роботи в книзі результатів досить трьох аркушів: «Пороги», «Зміни порогів» і «Перевірка даних». Що на решті аркушів, коротко сказано на першому аркуші книги, «Зміст», а докладніше в розділі 7 посібника (docs\\ПОСІБНИК_користувача.docx)."),
-            DTOutput("thresholds")),
-        uiOutput("next_res")),
+            DTOutput("thresholds"))),
       nav_panel_hidden("small",
         step_head("small", "Перевірте, які громади позначено через малу кількість випадків, і натисніть «Зберегти»."),
         layout_columns(col_widths = c(4, 8), fill = FALSE,
@@ -306,9 +306,10 @@ server <- function(input, output, session) {
     data_ok <- nrow(dataset_table(P())) > 0 && !is.null(rv$data_chk) && n_errors(rv$data_chk) == 0
     terr_ok <- data_ok && file.exists(file.path(d, "territories.csv")) && n_errors(terr_chk()) == 0 && !isTRUE(rv$terr_dirty)
     run_ok <- terr_ok && file.exists(file.path(d, "output", "memopt_thresholds.csv"))
-    c(project = TRUE, data = data_ok, terr = terr_ok, run = run_ok, res = run_ok, small = run_ok && small_saved(d))
+    small_ok <- run_ok && small_saved(d)
+    c(project = TRUE, data = data_ok, terr = terr_ok, run = run_ok, small = small_ok, res = small_ok)
   })
-  first_undone <- function() { st <- step_done(); k <- names(st)[!st]; if (length(k)) k[1] else "small" }
+  first_undone <- function() { st <- step_done(); k <- names(st)[!st]; if (length(k)) k[1] else "res" }
   output$stepper <- renderUI({
     st <- step_done(); cur <- input$tabs
     tags$div(class = "stepper", lapply(seq_along(STEPS), function(i) {
@@ -327,6 +328,7 @@ server <- function(input, output, session) {
   next_bar <- function(key, why = NULL) {
     st <- step_done(); ok <- st[[key]]
     i <- match(key, names(STEPS)); nk <- names(STEPS)[i + 1]
+    if (is.na(nk)) return(NULL)
     b <- actionButton(paste0("go_", nk), sprintf("Далі: крок %d. %s", i + 1, STEPS[[nk]]), class = paste("btn-next", if (ok) "btn-primary" else "btn-outline-secondary"))
     if (!ok) b <- tagAppendAttributes(b, disabled = NA)
     tags$div(class = "next-bar", if (!ok && !is.null(why)) tags$span(class = "why", why), b)
@@ -588,26 +590,69 @@ server <- function(input, output, session) {
     read.csv(f, stringsAsFactors = FALSE, encoding = "UTF-8")
   })
   output$flags_box <- renderUI({
-    if (is.null(thr())) return(box(NULL, cls = "warn", tags$p("Результатів ще немає: розрахуйте пороги на кроці 4.")))
+    if (is.null(thr()) || (!is.null(rv$job) && rv$job$is_alive())) return(NULL)
     x <- flags(); if (is.null(x) || !nrow(x)) return(NULL)
     box(sprintf("Сезони, які варто перевірити в даних: %d", nrow(x)), cls = "warn",
-        tags$p("Ці сезони помітно відрізняються від звичних для території: багато нульових чи пропущених тижнів або пік, утричі вищий чи нижчий за звичайний. Це не помилки, такі сезони беруться в розрахунок. Перевірте в Excel, чи правильно внесено дані. Якщо сезон справді зіпсований, виключіть його в налаштуваннях (кнопка вгорі праворуч) і розрахуйте пороги заново."),
+        tags$p("Ці сезони помітно відрізняються від звичних для території: багато нульових чи пропущених тижнів або пік, утричі вищий чи нижчий за звичайний. Це не помилки, такі сезони беруться в розрахунок. Перевірте в Excel, чи правильно внесено дані. Якщо сезон справді зіпсований, виключіть його в налаштуваннях (кнопка вгорі праворуч) і розрахуйте пороги заново. Якщо все гаразд, переходьте до наступного кроку."),
         DTOutput("flags"))
   })
-  output$next_res <- renderUI(next_bar("res", "Спершу розрахуйте пороги на кроці 4."))
+  # позначені громади з кроку «Громади з малою кількістю випадків», як їх збережено
+  marks <- reactive({
+    refresh(); rv$tick
+    tf <- file.path(proj_dir(P()), "territories.csv"); if (!file.exists(tf)) return(NULL)
+    t <- read.csv(tf, stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = c("", "NA"), check.names = FALSE)
+    if (!"district_confirm" %in% names(t)) return(NULL)
+    man <- read_cfg(P())$district_confirm$manual
+    t <- t[t$kind %in% "small" & !is.na(t$district_confirm), , drop = FALSE]
+    if (!nrow(t)) return(NULL)
+    lab <- ifelse(t$district_confirm != "так", "ні", ifelse(t$name %in% names(man),
+                  paste0("так, додано вручну (", vapply(t$name, function(n) if (n %in% names(man)) as.character(man[[n]])[1] else "", ""), ")"), "так, мало випадків"))
+    data.frame(id = t[[1]], label = lab, stringsAsFactors = FALSE)
+  })
+  MARK_COL <- "Громада з малою кількістю випадків"
+  output$res_state <- renderUI({
+    st <- step_done()
+    if (is.null(thr())) return(box(NULL, cls = "warn", tags$p("Результатів ще немає: розрахуйте пороги на кроці 4.")))
+    if (!st[["res"]]) return(box(NULL, cls = "warn", tags$p("Спершу збережіть громади з малою кількістю випадків на кроці 5, інакше в книзі результатів їх не буде позначено.")))
+    box("Усе зроблено", cls = "good",
+        tags$p(paste0("Пороги розраховано, громади з малою кількістю випадків позначено в колонці «", MARK_COL, "». Завантажте книгу результатів кнопкою нижче.")),
+        tags$p("Щороку після 20-го тижня, коли сезон завершився, допишіть його колонку в ряди, завантажте файли на кроці 2 і розрахуйте пороги заново."))
+  })
   output$thresholds <- renderDT({
     t <- thr()
     if (is.null(t)) return(datatable(data.frame(Повідомлення = "Результатів ще немає: запустіть розрахунок."), rownames = FALSE, options = list(dom = "t", language = lang())))
     if (input$res_kind != "all") t <- t[t$kind == input$res_kind, ]
     v <- data.frame(Територія = t$name, Вид = t$kind, `Сезони в розрахунку` = t$seasons_used, Кут = t$angle_txt,
                     Епідемічний = t$base, Середній = t$medium, Високий = t$high, `Дуже високий` = t$veryhigh, check.names = FALSE)
+    mk <- marks(); if (!is.null(mk)) v[[MARK_COL]] <- ifelse(is.na(match(t$id, mk$id)), "", mk$label[match(t$id, mk$id)])
     datatable(v, rownames = FALSE, options = list(pageLength = 25, language = lang())) |>
       formatRound(c("Епідемічний", "Середній", "Високий", "Дуже високий"), digits = 1, dec.mark = ",", mark = " ")
   })
-  output$dl_xlsx <- downloadHandler(filename = function() paste0("memopt_результати_", P(), ".xlsx"),
-                                    content = function(file) file.copy(file.path(proj_dir(P()), "output", "memopt_results.xlsx"), file))
-  output$dl_csv <- downloadHandler(filename = function() paste0("memopt_пороги_", P(), ".csv"),
-                                   content = function(file) file.copy(file.path(proj_dir(P()), "output", "memopt_thresholds.csv"), file))
+  output$dl_xlsx <- downloadHandler(filename = function() paste0("memopt_результати_", P(), ".xlsx"), content = function(file) {
+    src <- file.path(proj_dir(P()), "output", "memopt_results.xlsx"); mk <- marks()
+    if (is.null(mk)) return(file.copy(src, file))
+    # аркуш «Пороги» переписується з новою колонкою після «Дуже високий поріг»; решта книги без змін
+    wb <- openxlsx::loadWorkbook(src); sh <- "Пороги"
+    p <- openxlsx::readWorkbook(wb, sh, check.names = FALSE, sep.names = " ")
+    val <- ifelse(is.na(match(p$Код, mk$id)), "", mk$label[match(p$Код, mk$id)])
+    at <- match("Дуже високий поріг", names(p)); if (is.na(at)) at <- ncol(p)
+    p <- data.frame(p[seq_len(at)], setNames(list(val), MARK_COL), p[-seq_len(at)], check.names = FALSE)
+    pos <- match(sh, names(wb)); openxlsx::removeWorksheet(wb, sh); openxlsx::addWorksheet(wb, sh)
+    openxlsx::writeData(wb, sh, p, headerStyle = openxlsx::createStyle(textDecoration = "bold", fgFill = "#1F4E78", fontColour = "#FFFFFF", wrapText = TRUE, valign = "center"))
+    openxlsx::setColWidths(wb, sh, cols = seq_len(ncol(p)), widths = "auto"); openxlsx::freezePane(wb, sh, firstRow = TRUE, firstCol = TRUE)
+    n <- length(names(wb)); ord <- seq_len(n - 1); openxlsx::worksheetOrder(wb) <- append(ord, n, after = pos - 1)
+    if ("Зміст" %in% names(wb)) {
+      z <- openxlsx::readWorkbook(wb, "Зміст", check.names = FALSE, sep.names = " "); r <- match(sh, z$Аркуш)
+      if (!is.na(r)) openxlsx::writeData(wb, "Зміст", paste0(z[r, 3], " У колонці «", MARK_COL, "» позначено громади, у яких середній і вищі рівні показуються лише тоді, коли захворюваність у районі без районного центру (а якщо його немає, у всьому районі) перевищила свій епідемічний поріг."),
+                                         startCol = 3, startRow = r + 1)
+    }
+    openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+  })
+  output$dl_csv <- downloadHandler(filename = function() paste0("memopt_пороги_", P(), ".csv"), content = function(file) {
+    t <- read.csv(file.path(proj_dir(P()), "output", "memopt_thresholds.csv"), stringsAsFactors = FALSE, encoding = "UTF-8", check.names = FALSE)
+    mk <- marks(); if (!is.null(mk)) t$few_cases <- ifelse(is.na(match(t$id, mk$id)), "", sub(",.*", "", mk$label[match(t$id, mk$id)]))
+    write.csv(t, file, row.names = FALSE, na = "", fileEncoding = "UTF-8")
+  })
 
   # ----- громади з малою кількістю випадків
   observeEvent(input$project, {
@@ -666,13 +711,7 @@ server <- function(input, output, session) {
     showNotification(sprintf("Збережено: позначено %d %s.", length(on), plur(length(on), "громада", "громади", "громад")), type = "message"); rv$tick <- rv$tick + 1
   })
 
-  output$next_small <- renderUI({
-    st <- step_done()
-    if (st[["small"]]) return(box("Усе зроблено", cls = "good",
-      tags$p("Пороги розраховано, громади з малою кількістю випадків збережено. Книгу результатів і таблицю порогів можна завантажити на кроці 5."),
-      tags$p("Щороку після 20-го тижня, коли сезон завершився, допишіть його колонку в ряди, завантажте файли на кроці 2 і розрахуйте пороги заново.")))
-    tags$div(class = "next-bar", tags$span(class = "why", if (st[["run"]]) "Перевірте позначені громади і натисніть «Зберегти»." else "Спершу розрахуйте пороги на кроці 4."))
-  })
+  output$next_small <- renderUI(next_bar("small", if (step_done()[["run"]]) "Перевірте позначені громади і натисніть «Зберегти»." else "Спершу розрахуйте пороги на кроці 4."))
 
   output$settings <- renderTable({
     rv$settings_saved
