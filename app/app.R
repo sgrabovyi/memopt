@@ -200,7 +200,7 @@ ui <- page(
                      downloadButton("dl_xlsx", "Повна книга результатів (Excel)", class = "btn-outline-primary"),
                      downloadButton("dl_csv", "Таблиця порогів (CSV)", class = "btn-outline-primary"),
                      radioButtons("res_kind", NULL, c("Усі території" = "all", "Основні території" = "основна", "Громади" = "мала"), inline = TRUE)),
-            note("«Пороги для роботи» це один аркуш: територія, чотири пороги і позначка громад з малою кількістю випадків. У повній книзі результатів для щоденної роботи досить трьох аркушів: «Пороги», «Зміни порогів» і «Перевірка даних». Що на решті аркушів, коротко сказано на першому аркуші книги, «Зміст», а докладніше в розділі 7 посібника (docs\\ПОСІБНИК_користувача.docx)."),
+            note("«Пороги для роботи» містить ту саму таблицю, що нижче: територія, чотири пороги і позначка громад з малою кількістю випадків. У повній книзі результатів для щоденної роботи досить трьох аркушів: «Пороги», «Зміни порогів» і «Перевірка даних». Що на решті аркушів, коротко сказано на першому аркуші книги, «Зміст», а докладніше в розділі 7 посібника (docs\\ПОСІБНИК_користувача.docx)."),
             DTOutput("thresholds"))),
       nav_panel_hidden("small",
         step_head("small", "Перевірте, які громади позначено через малу кількість випадків, і натисніть «Зберегти»."),
@@ -619,15 +619,38 @@ server <- function(input, output, session) {
         tags$p(paste0("Пороги розраховано, громади з малою кількістю випадків позначено в колонці «", MARK_COL, "». Для роботи завантажте «Пороги для роботи (Excel)» кнопкою нижче.")),
         tags$p("Щороку після 20-го тижня, коли сезон завершився, допишіть його колонку в ряди, завантажте файли на кроці 2 і розрахуйте пороги заново."))
   })
+  # Пороги в робочому порядку: область, далі кожен район за абеткою, за ним його громади за абеткою, район без районного
+  # центру і районний центр. Район громади береться з території, з якою громада порівнюється (без слів «без центру»).
+  # Район міста визначається за спільним початком назв (Конотоп і Конотопський, Ромни і Роменський); місто без такого району йде в кінець.
+  work_table <- reactive({
+    t <- thr(); if (is.null(t)) return(NULL)
+    terr <- read.csv(file.path(proj_dir(P()), "territories.csv"), stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = c("", "NA"), check.names = FALSE); names(terr)[1] <- "id"
+    districts <- stringi::stri_sort(t$name[t$level == "район"], locale = "uk")
+    stem <- function(x) tolower(sub("^м\\.\\s*", "", x))
+    city_district <- function(city) {
+      pre <- vapply(districts, function(d) { a <- strsplit(stem(city), "")[[1]]; b <- strsplit(tolower(d), "")[[1]]; n <- min(length(a), length(b))
+        k <- which(a[seq_len(n)] != b[seq_len(n)]); if (length(k)) k[1] - 1L else n }, integer(1))
+      if (length(pre) && max(pre) >= 3) districts[which.max(pre)] else NA_character_
+    }
+    ref <- terr$name[match(terr$reference_id[match(t$id, terr$id)], terr$id)]
+    dist <- ifelse(t$level == "район", t$name, ifelse(t$level == "район без центру", sub(" без центру$", "", t$name),
+              ifelse(t$level == "громада", sub(" без центру$", "", ref), ifelse(t$level == "місто", vapply(t$name, city_district, ""), NA))))
+    pos <- match(dist, districts); pos[t$level == "область"] <- 0; pos[is.na(pos)] <- length(districts) + 1
+    within <- match(t$level, c("область", "район", "громада", "район без центру", "місто"))
+    nm <- rank(stringi::stri_rank(t$name, locale = "uk"))
+    t <- t[order(pos, within, nm), ]
+    v <- data.frame(Територія = t$name, `Епідемічний поріг` = round(t$base, 1), `Середній поріг` = round(t$medium, 1),
+                    `Високий поріг` = round(t$high, 1), `Дуже високий поріг` = round(t$veryhigh, 1), check.names = FALSE)
+    mk <- marks(); if (!is.null(mk)) v[[MARK_COL]] <- ifelse(is.na(match(t$id, mk$id)), "", sub(",.*", "", mk$label[match(t$id, mk$id)]))
+    attr(v, "kind") <- t$kind
+    v
+  })
   output$thresholds <- renderDT({
-    t <- thr()
-    if (is.null(t)) return(datatable(data.frame(Повідомлення = "Результатів ще немає: запустіть розрахунок."), rownames = FALSE, options = list(dom = "t", language = lang())))
-    if (input$res_kind != "all") t <- t[t$kind == input$res_kind, ]
-    v <- data.frame(Територія = t$name, Вид = t$kind, `Сезони в розрахунку` = t$seasons_used, Кут = gsub("еталон", "за районом", t$angle_txt),
-                    Епідемічний = t$base, Середній = t$medium, Високий = t$high, `Дуже високий` = t$veryhigh, check.names = FALSE)
-    mk <- marks(); if (!is.null(mk)) v[[MARK_COL]] <- ifelse(is.na(match(t$id, mk$id)), "", mk$label[match(t$id, mk$id)])
-    datatable(v, rownames = FALSE, options = list(pageLength = 25, language = lang())) |>
-      formatRound(c("Епідемічний", "Середній", "Високий", "Дуже високий"), digits = 1, dec.mark = ",", mark = " ")
+    v <- work_table()
+    if (is.null(v)) return(datatable(data.frame(Повідомлення = "Результатів ще немає: запустіть розрахунок."), rownames = FALSE, options = list(dom = "t", language = lang())))
+    if (input$res_kind != "all") v <- v[attr(v, "kind") == input$res_kind, , drop = FALSE]
+    datatable(v, rownames = FALSE, options = list(pageLength = 25, ordering = FALSE, language = lang())) |>
+      formatRound(2:5, digits = 1, dec.mark = ",", mark = " ")
   })
   # пороги для щоденної роботи: один аркуш з територіями і порогами, без розрахункових подробиць
   for_season <- function(t) {
@@ -635,21 +658,11 @@ server <- function(input, output, session) {
     if (is.finite(y)) paste0(y, "-", y + 1) else ""
   }
   output$dl_simple <- downloadHandler(filename = function() { t <- thr(); paste0("Пороги_", if (!is.null(t)) paste0(for_season(t), "_"), P(), ".xlsx") }, content = function(file) {
-    t <- thr(); tf <- file.path(proj_dir(P()), "territories.csv")
-    terr <- read.csv(tf, stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = c("", "NA"), check.names = FALSE); names(terr)[1] <- "id"
-    # район громади: назва території, з якою порівнюється громада, без слів «без центру»
-    ref <- terr$reference_id[match(t$id, terr$id)]
-    dist <- ifelse(t$level == "громада", sub(" без центру$", "", terr$name[match(ref, terr$id)]), "")
-    ord <- order(match(t$level, c("область", "район", "район без центру", "місто", "громада")), dist, t$name)
-    v <- data.frame(Територія = t$name, Рівень = t$level, Район = dist,
-                    `Епідемічний поріг` = round(t$base, 1), `Середній поріг` = round(t$medium, 1), `Високий поріг` = round(t$high, 1), `Дуже високий поріг` = round(t$veryhigh, 1),
-                    check.names = FALSE)
-    mk <- marks(); if (!is.null(mk)) v[[MARK_COL]] <- ifelse(is.na(match(t$id, mk$id)), "", sub(",.*", "", mk$label[match(t$id, mk$id)]))
-    v <- v[ord, ]; v$Район[is.na(v$Район)] <- ""
+    t <- thr(); v <- work_table(); attr(v, "kind") <- NULL; mk <- marks()
     wb <- openxlsx::createWorkbook(); sh <- "Пороги"; openxlsx::addWorksheet(wb, sh)
     openxlsx::writeData(wb, sh, v, headerStyle = openxlsx::createStyle(textDecoration = "bold", fgFill = "#1F4E78", fontColour = "#FFFFFF", wrapText = TRUE, valign = "center"))
-    openxlsx::addStyle(wb, sh, openxlsx::createStyle(numFmt = "0.0"), rows = seq_len(nrow(v)) + 1, cols = 4:7, gridExpand = TRUE)
-    openxlsx::setColWidths(wb, sh, cols = seq_len(ncol(v)), widths = c(34, 18, 24, 14, 14, 14, 14, if (ncol(v) > 7) 20))
+    openxlsx::addStyle(wb, sh, openxlsx::createStyle(numFmt = "0.0"), rows = seq_len(nrow(v)) + 1, cols = 2:5, gridExpand = TRUE)
+    openxlsx::setColWidths(wb, sh, cols = seq_len(ncol(v)), widths = c(36, 14, 14, 14, 14, if (ncol(v) > 5) 20))
     openxlsx::freezePane(wb, sh, firstRow = TRUE, firstCol = TRUE)
     s <- for_season(t)
     txt <- c(paste0("Пороги тижневої захворюваності на ГРВІ на 100 тис. населення", if (nzchar(s)) paste0(" для сезону ", sub("-", "/", s)), ". Розраховано ", format(file.mtime(file.path(proj_dir(P()), "output", "memopt_thresholds.csv")), "%d.%m.%Y"), " (проєкт «", P(), "»)."),
