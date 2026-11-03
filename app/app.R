@@ -102,7 +102,13 @@ ui <- page(
     .rule-num { font-size:28px; font-weight:700; color:#17345E; }
     .progress { height:24px; font-size:13px; margin:8px 0; }
     table.names td, table.names th { padding:3px 10px; }
-    .shiny-input-container { width:100% !important; }"))),
+    .shiny-input-container { width:100% !important; }
+    .shiny-file-input-progress .progress-bar { font-size:0; }"))),
+  tags$script(HTML("
+    $(document).on('change', 'input[type=file]', function() {
+      var n = this.files.length, t = $(this).closest('.input-group').find('input[type=text]');
+      if (n > 1) setTimeout(function() { t.val('обрано файлів: ' + n); }, 50);
+    });")),
   tags$div(class = "wrap",
     tags$div(class = "topbar",
       tags$div(tags$span(class = "brand", "memopt: пороги MEM"), uiOutput("proj_name", inline = TRUE)),
@@ -330,8 +336,12 @@ server <- function(input, output, session) {
 
   observeEvent(input$upload_xlsx, {
     f <- input$upload_xlsx; dest <- file.path(proj_dir(P()), "datasets")
-    ok <- file.copy(f$datapath, file.path(dest, f$name), overwrite = TRUE)
-    showNotification(paste("Збережено", sum(ok), plur(sum(ok), "файл", "файли", "файлів"), "; дані перевірено"), type = "message")
+    # файл з населенням громад до рядів не додається: він потрібен на кроці «Території»
+    pop <- vapply(f$datapath, is_population_file, logical(1))
+    if (any(pop)) showNotification(paste0("Файл «", paste(f$name[pop], collapse = "», «"), "» схожий на файл з населенням громад, тому його не додано до рядів. Завантажте його на кроці 3, «Території»."),
+                                   type = "warning", duration = 20)
+    ok <- file.copy(f$datapath[!pop], file.path(dest, f$name[!pop]), overwrite = TRUE)
+    if (length(ok)) showNotification(paste0("Додано ", sum(ok), " ", plur(sum(ok), "файл", "файли", "файлів"), " з рядами; дані перевірено."), type = "message")
     run_checks()
   })
   output$datasets <- renderDT({

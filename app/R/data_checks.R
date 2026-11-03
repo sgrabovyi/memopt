@@ -30,6 +30,14 @@ dataset_files <- function(dir) {
   f[!startsWith(basename(f), "~$")]
 }
 
+# Файл з населенням громад замість рядів: у заголовку є «населення», а сезонів немає
+is_population_file <- function(path) {
+  sh <- tryCatch(readxl::excel_sheets(path), error = function(e) character(0))
+  if (!length(sh)) return(FALSE)
+  hdr <- tolower(tryCatch(names(readxl::read_excel(path, sheet = sh[1], n_max = 0)), error = function(e) character(0)))
+  any(grepl("населен", hdr)) && !any(grepl("^[0-9]{4}/[0-9]{4}$", hdr))
+}
+
 # Усі аркуші всіх файлів: файл, аркуш, сезони
 scan_sheets <- function(dir) {
   out <- list()
@@ -133,7 +141,10 @@ check_datasets <- function(dir) {
   for (s in unique(d)) res[[length(res) + 1]] <- msg("помилка", paste(sheets$file[sheets$sheet == s], collapse = ", "), s, "", "аркуш з такою назвою є в кількох файлах",
                                                        "Назва аркуша це назва території, вона має бути єдиною: перейменуйте або видаліть зайвий аркуш")
   sig <- character(0); sig_where <- character(0)
-  for (f in files) for (s in tryCatch(readxl::excel_sheets(f), error = function(e) character(0))) {
+  pop <- vapply(files, is_population_file, logical(1))
+  for (f in files[pop]) res[[length(res) + 1]] <- msg("помилка", basename(f), "", "", "це файл з населенням громад, а не ряди захворюваності",
+                                                     "Видаліть його тут (клацніть рядок файлу і натисніть «Видалити позначений файл») і завантажте на кроці 3, «Території»")
+  for (f in files[!pop]) for (s in tryCatch(readxl::excel_sheets(f), error = function(e) character(0))) {
     res[[length(res) + 1]] <- check_sheet(f, s)
     # однакові дані на різних аркушах: зазвичай аркуш території скопійовано з іншого
     v <- tryCatch(suppressWarnings(as.matrix(readxl::read_excel(f, sheet = s, col_types = "numeric"))[, -1, drop = FALSE]), error = function(e) NULL)
