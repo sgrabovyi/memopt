@@ -667,7 +667,7 @@ mo_small_areas <- function(cfg, terr, ser, tabs, log) {
   own_angle <- mapply(function(p, tr) if (rule) mo_pick_angle_below(p$d, angle_by_tier[[tr]], cfg) else angle_by_tier[[tr]], preps, tier)
   usable <- !is.na(own_angle)
   own_angle_run <- ifelse(usable, own_angle, angle_by_tier[tier])
-  cat(sprintf("  Для %d громад кут зменшено, щоб епідемічний поріг лишався нижчим за середній. У %d громад власні дані не дають придатного порогу, тому їхні пороги спираються на еталон (район або район без центру).\n",
+  cat(sprintf("  Для %d громад кут зменшено, щоб епідемічний поріг лишався нижчим за середній. У %d громад власні дані не дають придатного порогу, тому їхні пороги розраховано за даними району без районного центру (а якщо його немає, усього району).\n",
               sum(usable & abs(own_angle_run - angle_by_tier[tier]) > 1e-9), sum(!usable))); flush.console()
   jobs <- Map(function(p, a) list(p = p, own_angle = a, ref_angle = ang_map[[p$refid]]), preps, own_angle_run)
   res <- mo_pmap(jobs, mo_hrom_job, cfg)
@@ -941,7 +941,7 @@ mo_run <- function(cfg_path) {
   }
   mw <- NULL
   if (isTRUE(cfg$diagnostics$multiple_waves)) {
-    cat("5. Додаткова перевірка: сезони з кількома хвилями\n"); flush.console()
+    cat("5. Перевірка сезонів, у яких захворюваність зростала кількома хвилями\n"); flush.console()
     mwitems <- lapply(seq_len(nrow(series_terr)), function(i) list(id = series_terr$id[i], name = series_terr$name[i], level = series_terr$level[i],
                                                                    d = ser[[series_terr$id[i]]], angle = tabs$angle[i]))
     if (has_small) {
@@ -950,6 +950,11 @@ mo_run <- function(cfg_path) {
                                                                                        d = ser[[rel$id[i]]], angle = hr$angle_by_tier[["надійні дані"]])))
     }
     mw <- do.call(rbind, mo_pmap(mwitems, mo_multiwave_one, cfg))
+    # та сама межа 12%, що й у звіті про книгу результатів
+    mwbig <- mw$name[(!is.na(mw$pct_base_mw) & abs(mw$pct_base_mw) > 12) | (!is.na(mw$pct_veryhigh_mw) & abs(mw$pct_veryhigh_mw) > 12)]
+    if (length(mwbig)) cat(sprintf("  Якби кожну хвилю рахувати окремим сезоном, пороги змінились би більш ніж на 12%% у %d %s: %s. Розраховані пороги від цього не змінюються. Якщо в цих територіях були сезони з двома піками, порівняйте пороги на аркуші «%s» книги результатів.\n",
+                                    length(mwbig), if (length(mwbig) == 1) "території" else "територіях", paste(mwbig, collapse = ", "), MO_SHEETS$waves))
+    else cat("  Сезони з кількома хвилями на пороги помітно не впливають.\n")
   }
 
   cat("6. Запис результатів\n"); flush.console()
