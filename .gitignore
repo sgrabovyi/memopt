@@ -5,4 +5,9 @@ __pycache__/
 .RData
 output_*.log
 output_test_*/
-projects/
+projects/*
+# робочий проєкт Сумщини: у git лише налаштування і перелік територій (дані на Google Диску, результати перераховуються)
+!projects/Сумська область/
+projects/Сумська область/*
+!projects/Сумська область/config.json
+!projects/Сумська область/territories.csv
