@@ -1,5 +1,4 @@
-# Рисунки для статті. Усі дані беруться з output/ memopt, крім рис. 4, де числа восьмисезонного
-# розрахунку взято з запуску 20.10.2026 на восьми сезонах (конфігурацію вилучено, числа збережено в коді), див. коментар.
+# Рисунки для статті. Усі дані беруться з output/ memopt (книга результатів, пороги, заповнені ряди) і input/hromadas.xlsx.
 import os
 import numpy as np, pandas as pd
 import matplotlib
@@ -79,25 +78,28 @@ ax.set_xlabel("Тиждень сезону"); ax.set_ylabel("Район, на 10
 ax.legend(fontsize=7, frameon=False, loc="upper left")
 fig.tight_layout(); fig.savefig(f"{FIG}/fig3_district_confirm.png", dpi=220); plt.close(fig)
 
-# ---------- Рис. 4: тижнів вище епідемічного порогу району в 2025/2026: пороги на 8 і на 5 сезонах
-# Числа восьмисезонного варіанта взято з попереднього запуску memopt (config_8seasons_backup.json, 20.10.2026);
-# п'ятисезонні перераховано тут із поточних файлів.
-names8 = ["Конотопський район без центру", "Роменський район без центру", "Сумський район без центру", "Шосткинський район без центру", "Охтирський район без центру",
-          "Конотопський район", "Роменський район", "Сумський район", "Шосткинський район", "Охтирський район"]
-ids = ["UA5902_nc", "UA5906_nc", "UA5908_nc", "UA5910_nc", "UA5904_nc", "UA5902", "UA5906", "UA5908", "UA5910", "UA5904"]
-w8 = {"UA5902_nc": 25, "UA5906_nc": 14, "UA5908_nc": 1, "UA5910_nc": 1, "UA5904_nc": 1, "UA5902": 13, "UA5906": 6, "UA5908": 3, "UA5910": 5, "UA5904": 4}
-w5 = {}
-for i in ids:
-    s = series(i, "2025/2026"); w5[i] = int(np.nansum(s >= T.loc[i, "base"]))
-print("тижнів над епідемічним порогом 2025/26 (обрані набори сезонів):", w5)
-fig, ax = plt.subplots(figsize=(7.2, 3.4))
-y = np.arange(len(ids))
-ax.barh(y - 0.2, [w8[i] for i in ids], 0.4, color="#bbbbbb", label="пороги на 8 сезонах (2012/13 до 2025/26)")
-ax.barh(y + 0.2, [w5[i] for i in ids], 0.4, color="#1f77b4", label="пороги на 5 сезонах (2017/18 до 2025/26)")
-ax.set_yticks(y); ax.set_yticklabels(names8, fontsize=8); ax.invert_yaxis()
-ax.set_xlabel("Тижнів сезону 2025/2026 не нижче епідемічного порогу (з 33)")
-ax.legend(frameon=False, fontsize=8)
-fig.tight_layout(); fig.savefig(f"{FIG}/fig4_8vs5.png", dpi=220); plt.close(fig)
+# ---------- Рис. 4: добір набору сезонів для області: помилки на контрольних сезонах і MCC за довжиною набору
+D = X["Добір сезонів"]; d = D[D["Код"] == "UA59"].sort_values("Сезонів у наборі")
+n = d["Сезонів у наборі"].values
+fs = d["Хибних сигналів за контрольні сезони"].values; dl = d["Запізнення за контрольні сезони, тижнів"].values
+fig, ax1 = plt.subplots(figsize=(6.4, 3.8))
+ax1.bar(n, fs, 0.6, color="#e07b00", label="хибні сигнали")
+ax1.bar(n, dl, 0.6, bottom=fs, color="#1f77b4", label="тижні запізнення")
+for x, ok, ch in zip(n, d["У допустимому діапазоні"].values, d["Обрано"].values):
+    if not ok:
+        ax1.text(x, 10.4, "не допущено", ha="center", fontsize=7, color="#555555")
+    if ch:
+        ax1.text(x, 7.4, "обрано", ha="center", fontsize=8, fontweight="bold")
+ax1.set_xlabel("Сезонів у наборі (найновіші)"); ax1.set_ylabel("Тижнів за два контрольні сезони")
+ax1.set_ylim(0, 12.5); ax1.set_xticks(n)
+ax2 = ax1.twinx(); ax2.spines["right"].set_visible(True)
+ax2.plot(n, d["MCC на контрольних сезонах"].values, color="black", marker="o", ms=4, lw=1.2, label="MCC")
+lo = float(d["Найнижчий дозволений MCC"].dropna().iloc[0])
+ax2.axhline(lo, color="black", ls=":", lw=1, label=f"найнижчий дозволений MCC {lo:.2f}".replace(".", ","))
+ax2.set_ylabel("MCC на контрольних сезонах"); ax2.set_ylim(0, 1)
+h1, l1 = ax1.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
+ax1.legend(h1 + h2, l1 + l2, frameon=False, fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=4)
+fig.tight_layout(); fig.savefig(f"{FIG}/fig4_seasons.png", dpi=220); plt.close(fig)
 
 # ---------- Рис. 5: кут нахилу для області: сумарна помилка і поріг
 A = X["Кут нахилу"]; a = A[A["Назва"] == "Сумська область"]
