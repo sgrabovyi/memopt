@@ -14,7 +14,7 @@ FILES = [
     ("_find_r.cmd", "_find_r.cmd"), ("install_packages.R", "install_packages.R"), ("run_optimizer.R", "run_optimizer.R"),
     ("app/app.R", "app/app.R"), ("app/R/project.R", "app/R/project.R"), ("app/R/data_checks.R", "app/R/data_checks.R"), ("app/R/territories.R", "app/R/territories.R"),
     ("templates/series_template.xlsx", "templates/series_template.xlsx"), ("templates/territories_template.csv", "templates/territories_template.csv"),
-    ("docs/ПОСІБНИК_користувача.docx", "docs/ПОСІБНИК_користувача.docx"),
+    ("docs/ПОСІБНИК_користувача.docx", "docs/ПОСІБНИК_користувача.docx"), ("LICENSE", "LICENSE.txt"),
 ]
 
 def strip_export(core):
