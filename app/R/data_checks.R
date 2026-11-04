@@ -114,6 +114,9 @@ check_sheet <- function(path, sheet) {
           "Схоже, колонку скопійовано: вставте правильні дані одного з сезонів")
   }
   # значення
+  gaps <- list()
+  filled <- vapply(seq_len(ncol(x)), function(j) grepl("^[0-9]{4}/[0-9]{4}$", hdr[j]) && any(!is.na(suppressWarnings(as.numeric(gsub(",", ".", x[[j]]))))), logical(1))
+  first_s <- if (any(filled)) min(hdr[filled]) else ""
   for (j in 2:ncol(x)) {
     if (!grepl("^[0-9]{4}/[0-9]{4}$", hdr[j])) next
     v <- x[[j]]; num <- suppressWarnings(as.numeric(gsub(",", ".", v)))
@@ -128,6 +131,25 @@ check_sheet <- function(path, sheet) {
     nw <- sum(!is.na(num))
     if (nw > 0 && nw < 10 && !season_running(hdr[j])) add("увага", fn, sheet, col_letter(j), sprintf("у сезоні %s лише %d %s з даними", hdr[j], nw, plur(nw, "тиждень", "тижні", "тижнів")),
                                                           "Сезон з менш ніж 10 тижнями даних у розрахунок не потрапить")
+    # порожні тижні всередині сезону: ядро вважає їх пропущеними, а не нульовими. Святкові тижні (52 або 53, 1 і 2)
+    # ядро і так робить порожніми; у сезоні, що ще триває, порожні тижні після останнього заповненого не рахуються,
+    # а в найпершому сезоні аркуша не рахуються тижні до першого заповненого (ряд територій почався пізніше)
+    if (nw >= 10) {
+      hol <- c(if (has_week53(hdr[j])) 53 else 52, 1, 2)
+      need <- setdiff(c(WEEKS_ALL, if (has_week53(hdr[j])) 53), hol)
+      rows <- which(w %in% need)
+      if (season_running(hdr[j])) rows <- rows[rows <= max(which(!is.na(num)))]
+      if (hdr[j] == first_s) rows <- rows[rows >= min(which(!is.na(num)))]
+      gap <- rows[is.na(num[rows])]
+      if (length(gap)) gaps[[length(gaps) + 1]] <- data.frame(season = hdr[j], n = length(gap), cells = paste(paste0(col_letter(j), head(gap, 3) + 1), collapse = ", "))
+    }
+  }
+  if (length(gaps)) {
+    g <- do.call(rbind, gaps); tot <- sum(g$n)
+    add("увага", fn, sheet, paste0(g$cells[1], if (tot > 3 || nrow(g) > 1) " та інші" else ""),
+        sprintf("%d %s у %s %s", tot, plur(tot, "порожній тиждень", "порожні тижні", "порожніх тижнів"), if (nrow(g) > 1) "сезонах" else "сезоні",
+                paste0(g$season, " (", g$n, ")", collapse = ", ")),
+        "Порожня клітинка означає, що даних немає, і пороги можуть вийти іншими. Якщо випадків у ці тижні не було, впишіть 0; якщо дані є, допишіть їх")
   }
   if (length(res)) do.call(rbind, res) else NULL
 }
