@@ -292,6 +292,7 @@ mo_season_result <- function(y, T, tm, noepi = FALSE) {
 # стандартним кутом за всіма іншими доступними сезонами території, тому рішення не залежить від кута і набору сезонів,
 # які перевіряються (інакше високий поріг сам оголошував би сезони неепідемічними і здавався б кращим).
 mo_noepi_seasons <- function(d, cfg, seasons = names(d)) {
+  if (!is.null(cfg$.truth_noepi)) return(intersect(seasons, cfg$.truth_noepi))  # зовнішня розмітка (run_hmm_check.R)
   a <- cfg$angle$truth_angle
   S <- names(d); out <- character(0)
   for (s in intersect(seasons, S)) {
@@ -369,7 +370,8 @@ mo_stable_floor <- function(scan, drop, start) {
 mo_scan_angles <- function(d, cfg, eval_seasons = NULL) {
   grid <- mo_angle_grid(cfg); truth <- cfg$angle$truth_angle
   S <- names(d)
-  tms <- lapply(S, function(s) mo_season_timing(d[[s]], cfg)); names(tms) <- S
+  # cfg$.truth_tms: межі епідемії із зовнішньої розмітки (run_hmm_check.R); без неї межі визначає memtiming
+  tms <- if (!is.null(cfg$.truth_tms)) cfg$.truth_tms[S] else { x <- lapply(S, function(s) mo_season_timing(d[[s]], cfg)); names(x) <- S; x }
   rows <- lapply(grid, function(p) {
     tv <- mo_thr_vec(mo_thr_model(d, p))
     gv <- mo_good_vec(d, p, cfg$angle$min_seasons_goodness)
