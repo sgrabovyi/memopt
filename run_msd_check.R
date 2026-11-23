@@ -1,7 +1,8 @@
 # Порівняння порогів MSD (mean standard deviation, UKHSA: Sinnathamby et al., Euro Surveill 2024;29(45):2400696)
 # з порогами memopt і простого MEM для області, районів і громад.
 #
-# MSD: середнє і стандартне відхилення тижневої захворюваності за рік від 27-го до 26-го тижня (усі тижні року, разом з літом);
+# MSD: середнє і стандартне відхилення тижневої захворюваності за рік від 27-го до 26-го тижня (усі тижні року, разом з літом,
+#   як у статті для COVID-19) і, окремим варіантом, лише на тижнях сезону 40-20 (ряди memopt, ті самі, що бачить MEM);
 #   епідемічний поріг = середнє, середній = середнє + 1 SD, високий = середнє + 3 SD, дуже високий = середнє + 5 SD.
 #   Річні ряди беруться з ETL (Fact_Diseases.csv, з 42-го тижня 2023 року) і зводяться до масштабу рядів memopt.
 #
@@ -61,12 +62,15 @@ cat("Масштаб річних рядів до memopt: від", round(min(scal
 
 msd <- function(v) { v <- v[!is.na(v)]; m <- mean(v); s <- sd(v); c(base = m, medium = m + s, high = m + 3 * s, veryhigh = m + 5 * s, n_weeks = length(v)) }
 msd_thr <- function(id, blocks) msd(yrr[[id]]$rate[yrr[[id]]$block %in% blocks])
+# варіант на тижнях сезону (40-20), ті самі ряди, що бачить MEM (святкові тижні порожні)
+msd_season <- function(id, seasons) { d <- ser[[id]]; seasons <- intersect(seasons, names(d)); if (!length(seasons)) return(c(base = NA, medium = NA, high = NA, veryhigh = NA, n_weeks = 0)); msd(unlist(d[, seasons, drop = FALSE])) }
 
 # ---------------------------------------------------------------- 2. пороги для кожного сезону перевірки
 read_mo <- function(s) read.csv(file.path(cfg$.path(cfg$paths$output_dir), "quest_check", paste0("memopt_без_", gsub("/", "_", s)), "memopt_thresholds.csv"), encoding = "UTF-8", stringsAsFactors = FALSE)
 plans <- list(
-  "2025/2026" = list("MSD, 1 рік (27/2024-26/2025)" = 2024, "MSD, 2 роки (42/2023-26/2025)" = c(2023, 2024)),
-  "2024/2025" = list("MSD, неповний рік (42/2023-26/2024)" = 2023))
+  "2025/2026" = list("MSD, 1 рік (27/2024-26/2025)" = 2024, "MSD, 2 роки (42/2023-26/2025)" = c(2023, 2024),
+                     "MSD сезону, 1 сезон (2024/25)" = "2024/2025", "MSD сезону, 2 сезони (2023/24, 2024/25)" = c("2023/2024", "2024/2025")),
+  "2024/2025" = list("MSD, неповний рік (42/2023-26/2024)" = 2023, "MSD сезону, 1 сезон (2023/24)" = "2023/2024"))
 rows <- list(); thr_rows <- list()
 for (s in names(plans)) {
   mo <- read_mo(s)
@@ -75,7 +79,7 @@ for (s in names(plans)) {
     if (!(s %in% names(d))) next
     prior <- names(d)[names(d) < s]
     th <- list()
-    for (nm in names(plans[[s]])) th[[nm]] <- msd_thr(t$id, plans[[s]][[nm]])
+    for (nm in names(plans[[s]])) { b <- plans[[s]][[nm]]; th[[nm]] <- if (is.character(b)) msd_season(t$id, b) else msd_thr(t$id, b) }
     k <- match(t$id, mo$id); th[["memopt"]] <- c(base = mo$base[k], medium = mo$medium[k], high = mo$high[k], veryhigh = mo$veryhigh[k], n_weeks = NA)
     th[["простий MEM, попередні сезони"]] <- if (length(prior) >= 2) c(mo_thr_vec(mo_thr_model(d[, prior, drop = FALSE], 2.8)), n_weeks = NA) else c(base = NA, medium = NA, high = NA, veryhigh = NA, n_weeks = NA)
     for (nm in names(th)) thr_rows[[length(thr_rows) + 1]] <- data.frame(id = t$id, name = t$name, level = t$level, held = s, method = nm, as.list(round(th[[nm]], 1)))
@@ -140,10 +144,13 @@ num <- sapply(sm, is.numeric); sm[num] <- lapply(sm[num], function(v) round(v, 3
 wk_thr <- read.csv(file.path(cfg$.path(cfg$paths$output_dir), "memopt_thresholds.csv"), encoding = "UTF-8", stringsAsFactors = FALSE)
 cmp <- do.call(rbind, lapply(seq_len(nrow(terr)), function(i) {
   t <- terr[i, ]; m <- msd_thr(t$id, 2025); k <- match(t$id, wk_thr$id)
+  s1 <- msd_season(t$id, "2025/2026"); s3 <- msd_season(t$id, c("2023/2024", "2024/2025", "2025/2026"))
   data.frame(id = t$id, name = t$name, level = t$level, weeks_in_year = m[["n_weeks"]],
              mem_base = wk_thr$base[k], msd_base = round(m[["base"]], 1), mem_medium = wk_thr$medium[k], msd_medium = round(m[["medium"]], 1),
              mem_high = wk_thr$high[k], msd_high = round(m[["high"]], 1), mem_veryhigh = wk_thr$veryhigh[k], msd_veryhigh = round(m[["veryhigh"]], 1),
-             ratio_base = round(m[["base"]] / wk_thr$base[k], 2), ratio_medium = round(m[["medium"]] / wk_thr$medium[k], 2))
+             ratio_base = round(m[["base"]] / wk_thr$base[k], 2), ratio_medium = round(m[["medium"]] / wk_thr$medium[k], 2),
+             msds1_base = round(s1[["base"]], 1), msds1_medium = round(s1[["medium"]], 1), msds1_high = round(s1[["high"]], 1), msds1_veryhigh = round(s1[["veryhigh"]], 1),
+             msds3_base = round(s3[["base"]], 1), msds3_medium = round(s3[["medium"]], 1), msds3_high = round(s3[["high"]], 1), msds3_veryhigh = round(s3[["veryhigh"]], 1))
 }))
 
 ru <- c(held = "Сезон перевірки", truth = "Межі епідемії", group = "Рівень", method = "Спосіб", no_threshold = "Поріг не побудовано",
